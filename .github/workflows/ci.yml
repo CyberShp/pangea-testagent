@@ -1,0 +1,72 @@
+name: V1 tests and Windows package
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Core and protocol integration tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci
+      - run: node scripts/test-ui.cjs
+  windows-package:
+    needs: [test, ui]
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build portable runtime
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - name: Smoke packaged executable
+        shell: pwsh
+        run: |
+          $env:TESTAGENT_DATA_DIR = Join-Path $env:RUNNER_TEMP 'testagent-smoke'
+          $entry = Join-Path (Get-Location) 'dist/portable/app/entry.py'
+          $p = Start-Process 'dist/portable/app/runtime/pythonw.exe' -ArgumentList "`"$entry`" --serve --port 18765" -PassThru
+          try {
+            $ready = $false
+            for ($i=0; $i -lt 45; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
+                if ($health.version -eq '1.0.0') { $ready = $true; break }
+              } catch { }
+            }
+            if (-not $ready) { throw 'Packaged server did not become ready' }
+          } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pangea-testagent-v1-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error

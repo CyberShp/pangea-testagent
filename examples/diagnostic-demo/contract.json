@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "roles": [{"id": "controller", "name": "模拟控制器"}],
+  "steps": [{"id": "inspect", "name": "诊断视图检查", "required": true}],
+  "checks": [{"id": "flag-present", "step_id": "inspect", "required": true}],
+  "critical_actions": [{"id": "enter-diagnostic", "step_id": "inspect", "description": "进入模拟诊断视图并读取测试标记，不连接真实设备"}],
+  "scripts": []
+}

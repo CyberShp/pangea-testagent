@@ -1,0 +1,8 @@
+{
+  "name": "pangea-testagent-ui-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development-only DOM tests; no Node runtime required in Windows distribution",
+  "scripts": {"test:ui": "node scripts/test-ui.cjs"},
+  "devDependencies": {"jsdom": "26.1.0"}
+}

@@ -1,0 +1,59 @@
+# v1 框架约定
+
+## 包结构
+
+- `skill.json`：`id`（小写字母、数字、下划线、连字符）、`name`、`version`。
+- `SKILL.md`：供 Agent 阅读的流程说明，包含标准 Skill frontmatter。
+- `contract.json`：结构化展示与检查约定。
+- `scripts/`：UTF-8 配套脚本。包内文件仅支持文本，二进制部署附件应从任务文件区提供。
+
+ZIP 可以直接包含上述文件，也可以包含唯一顶层目录。禁止绝对路径、父目录跳转和符号链接，最大 32 MiB。
+
+## contract.json 示例
+
+```json
+{
+  "schema_version": 1,
+  "roles": [{"id": "controller", "name": "目标控制器"}],
+  "parameters": {
+    "type": "object",
+    "properties": {"label": {"type": "string", "title": "测试标记"}},
+    "required": ["label"]
+  },
+  "steps": [{"id": "inspect", "name": "环境检查", "required": true}],
+  "checks": [{"id": "marker", "step_id": "inspect", "required": true, "assertion": {"contains": "READY"}}],
+  "critical_actions": [{"id": "enter-diagnostic", "step_id": "inspect", "description": "进入诊断视图，保持其他配置不变"}],
+  "scripts": [],
+  "recovery": "根据变更前备份和实际执行记录提出恢复；核对现场后执行并验证。不确定的原值交给用户确认。"
+}
+```
+
+steps、checks 必须明确 required。检查和关键操作引用有效 step_id。scripts 中的路径必须存在。`assertion` 支持 `contains` 字符串，或 `field` 点分隔字段加 `equals` 精确值；缺省 assertion 表示 Agent 根据工具证据判断，不能宣称为确定性验证。
+
+## 统一 testagent 工具
+
+调用格式为一个 JSON 对象，`action` 指定操作；设备相关操作填写 `role`，关键操作填写 `action_id`。
+
+| action | 主要参数 | 结果 |
+|---|---|---|
+| skill_read | path，默认 SKILL.md | 包内文件内容 |
+| files / file_read | file_read 需 file_id | 任务附件清单或文本 |
+| artifact_write | name、text | 输出文件 ID |
+| exec | role、command、timeout | operation_id、stdout、stderr、exit_code |
+| script | role、path 或 file_id、args、timeout | 脚本执行结果；Linux 需 sh 和 setsid |
+| shell_open | role、expect、timeout | session_id、提示符匹配结果 |
+| shell_send | role、session_id、text、expect、timeout；预期重启可用 expect_disconnect=true 替代 expect | 同一交互视图的输出 |
+| shell_close | role、session_id | 关闭终端，不等同终止远端后台进程 |
+| remote_read | role、path | UTF-8 文件内容 |
+| remote_write | role、path、text | 回读验证及变更前备份 file_id |
+| upload | role、file_id、path | 上传与回读验证 |
+| download | role、path、name（可选） | 任务输出 file_id |
+| wait_connected | role、timeout | 新连接成功；仍需验证重启后业务状态 |
+| step | step_id | 步骤完成 |
+| check | check_id、evidence_operation、passed | 检查结果；有 assertion 时由框架判定 |
+| ask | text | 等待用户回答，没有自动超时 |
+| finish | summary | 请求结束；必要检查未通过时框架拒绝成功 |
+
+每个设备操作返回 operation_id。check 的 evidence_operation 必须引用当前任务已经结束的工具操作。终端命令没有可靠退出码时使用提示符/输出验证，不填虚假的 0。
+
+框架会读取 Skill，提供固定角色、参数和文件清单；不需要模型知道密码、设备库结构或本地数据库路径。

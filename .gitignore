@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+dist/
+*.egg-info/
+
+build/
+*.spec
+node_modules/
+
+# Private project documents are not published.
+/docs/
+/AGENTS.md
