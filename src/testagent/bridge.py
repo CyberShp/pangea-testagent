@@ -7,6 +7,9 @@ from .tools import TOOL
 
 
 def main():
+    # MCP stdio is UTF-8 regardless of the Windows console code page.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
     for line in sys.stdin:
         request=None
         try:

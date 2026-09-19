@@ -20,9 +20,10 @@ for line in sys.stdin:
         servers=params.get('mcpServers',[])
         if servers:
             server=servers[0];env=os.environ.copy();env.update({x['name']:x['value'] for x in server['env']})
-            bridge=subprocess.Popen([server['command'],*server['args']],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,env=env)
+            bridge=subprocess.Popen([server['command'],*server['args']],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True,encoding="utf-8",env=env)
             mcp('initialize',{'protocolVersion':'2024-11-05','capabilities':{},'clientInfo':{'name':'fixture','version':'1'}})
             tools=mcp('tools/list',{})
+            assert 'result' in tools, tools
             assert tools['result']['tools'][0]['name']=='testagent'
         result={'sessionId':'fixture-session','models':{'availableModels':[{'modelId':'fixture-model','name':'Fixture'}],'currentModelId':'fixture-model'}}
     elif method=='session/set_model':result={}

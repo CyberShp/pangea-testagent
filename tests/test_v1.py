@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import threading
 import time
@@ -125,6 +126,22 @@ class V1Tests(unittest.TestCase):
             msg=backend.completion([{'role':'user','content':'test'}],'fixture-model')
             self.assertEqual(json.loads(msg['tool_calls'][0]['function']['arguments']),{'action':'finish'})
         finally:backend.close();server.shutdown();server.server_close()
+
+    def test_mcp_stdio_uses_utf8_with_non_utf8_process_default(self):
+        env=os.environ.copy()
+        env['PYTHONIOENCODING']='ascii'
+        env['PYTHONPATH']=str(Path(__file__).resolve().parents[1]/'src')
+        requests=[{'jsonrpc':'2.0','id':1,'method':'tools/list'},
+                  {'jsonrpc':'2.0','id':'中文请求','method':'ping'}]
+        wire=''.join(json.dumps(request,ensure_ascii=False)+'\n' for request in requests).encode('utf-8')
+        result=subprocess.run([sys.executable,'-m','testagent.bridge'],input=wire,
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr.decode('utf-8',errors='replace'))
+        replies=[json.loads(line) for line in result.stdout.decode('utf-8').splitlines()]
+        self.assertEqual(len(replies),2,replies)
+        self.assertIn('result',replies[0],replies[0])
+        self.assertEqual(replies[0]['result']['tools'][0]['name'],'testagent')
+        self.assertEqual(replies[1],{'jsonrpc':'2.0','id':'中文请求','result':{}})
 
     def test_acp_mcp_bridge_complete_task(self):
         fixture=Path(__file__).parent/'fixtures'/'fake_acp.py'
