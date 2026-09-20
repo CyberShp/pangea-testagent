@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import secrets
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit, quote
 
@@ -63,6 +64,25 @@ def make_server(core,port=0,catalog=None,runtime=None):
             try:
                 if url.path=='/api/health':self.send(200,{'version':VERSION,'status':'ready'})
                 elif url.path=='/api/state':self.send(200,{**catalog.state(),'token':token,'version':VERSION})
+                elif url.path=='/api/stream':
+                    ident=q['task_id'];core.task(ident)
+                    cursor=int(self.headers.get('Last-Event-ID') or q.get('after',0))
+                    self.send_response(200)
+                    self.send_header('Content-Type','text/event-stream; charset=utf-8')
+                    self.send_header('Cache-Control','no-cache')
+                    self.send_header('Connection','close')
+                    self.end_headers();self.close_connection=True
+                    heartbeat=0
+                    try:
+                        while not runtime.closed.is_set():
+                            with core.lock:
+                                latest=core.db.execute('SELECT COALESCE(MAX(seq),0) FROM events WHERE task_id=?',(ident,)).fetchone()[0]
+                            if latest>cursor:
+                                self.wfile.write(f'id: {latest}\ndata: {latest}\n\n'.encode());self.wfile.flush();cursor=latest
+                            elif time.monotonic()-heartbeat>10:
+                                self.wfile.write(b': keepalive\n\n');self.wfile.flush();heartbeat=time.monotonic()
+                            runtime.closed.wait(.3)
+                    except (BrokenPipeError,ConnectionResetError):pass
                 elif url.path.startswith('/api/tasks/'):
                     ident=url.path.rsplit('/',1)[-1]
                     task=core.task(ident)
@@ -70,8 +90,10 @@ def make_server(core,port=0,catalog=None,runtime=None):
                     public=json.loads(json.dumps(task))
                     if public['snapshot'].get('profile'):public['snapshot']['profile']['config'].pop('credential',None)
                     for device in public['snapshot'].get('devices',{}).values():device.pop('credential',None)
+                    from .execution import comparisons
                     self.send(200,{'task':public,'events':core.events(ident,int(q.get('after',0))),
-                        'files':catalog.files(ident),'recoveries':runtime.recovery_list(ident)})
+                        'files':catalog.files(ident),'recoveries':runtime.recovery_list(ident),
+                        'previews':core.previews(ident),'comparisons':comparisons(core,ident)})
                 elif url.path=='/api/skills/detail':
                     with core.lock:row=core.db.execute('SELECT package FROM skills WHERE id=? AND version=?',(q['id'],q['version'])).fetchone()
                     if not row:raise DomainError('Skill 不存在')
@@ -89,9 +111,9 @@ def make_server(core,port=0,catalog=None,runtime=None):
                 elif url.path=='/api/authoring-skill':
                     from .packages import from_folder
                     self.send(200,to_zip(from_folder(ROOT/'skills'/'testagent-skill-author')),'application/zip','testagent-skill-author.zip')
-                elif url.path in ('/','/app.js','/style.css'):
+                elif url.path in ('/','/app.js','/task-view.js','/style.css'):
                     name='index.html' if url.path=='/' else url.path[1:]
-                    mime={'index.html':'text/html','app.js':'text/javascript','style.css':'text/css'}[name]
+                    mime={'index.html':'text/html','app.js':'text/javascript','task-view.js':'text/javascript','style.css':'text/css'}[name]
                     self.send(200,(ROOT/'web'/name).read_bytes(),mime+'; charset=utf-8')
                 else:self.send(404,{'error':'资源不存在'})
             except Exception as exc:self.send(400,{'error':catalog.vault.redact(str(exc))})
@@ -176,6 +198,11 @@ def make_server(core,port=0,catalog=None,runtime=None):
             if path=='/api/tasks/message':return catalog.message(v['task_id'],v['text'])
             if path=='/api/files':return catalog.add_file(v['task_id'],v['name'],base64.b64decode(v['data'],validate=True))
             if path=='/api/approve':return core.approve(v['task_id'],v['approval_id'])
+            if path=='/api/preview/approve':return core.approve_preview(v['task_id'],v['preview_id'])
+            if path=='/api/preview/reject':
+                core.reject_preview(v['task_id'],v['preview_id'])
+                if v['task_id'] in runtime.runs:runtime.runs[v['task_id']]['cancel'].set()
+                return {'rejected':True}
             if path=='/api/reject':
                 core.fail(v['task_id'],'用户拒绝操作授权')
                 if v['task_id'] in runtime.runs:runtime.runs[v['task_id']]['cancel'].set()

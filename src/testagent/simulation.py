@@ -1,5 +1,7 @@
 """Explicit in-process diagnostic simulator, not an AI or SSH implementation."""
 import threading
+import json
+from .execution import simulation_operation
 
 from .core import DomainError
 
@@ -50,8 +52,8 @@ class Simulator:
         if task["snapshot"]["skill"]["id"] != "diagnostic-demo":
             self.core.fail(ident, "当前模拟器仅支持 diagnostic-demo；不会伪造其他 Skill 执行结果")
             return
-        device = task["snapshot"]["roles"]["controller"]
-        self.core.request_operation(ident, device, "diagnose → show test-config", "enter-diagnostic")
+        self.core.propose_preview(ident,'检查模拟控制器的测试标记','仅执行本机模拟诊断交互',
+                                  '检查输出包含 flag=enabled',[simulation_operation()])
 
     def execute(self, ident):
         # Serialize stop vs execution. Real long-running executors must use cancel handles,
@@ -59,6 +61,15 @@ class Simulator:
         with self.core.lock:
             row = self.core.db.execute("SELECT id FROM approvals WHERE task_id=? AND status='approved'", (ident,)).fetchone()
             if not row:
+                task=self.core.task(ident)
+                if task['status']=='running':
+                    plans=self.core.previews(ident)
+                    if plans and plans[-1]['status']=='superseded':
+                        with self.core.tx():self.core.db.execute('UPDATE messages SET consumed=1 WHERE task_id=?',(ident,))
+                        self.prepare(ident)
+                        return
+                    if not plans or plans[-1]['status']!='approved':return
+                    self.core.request_operation(ident,task['snapshot']['roles']['controller'],json.dumps(simulation_operation()),'enter-diagnostic')
                 return
             self.core.consume_operation(ident, row[0])
             session = DiagnosticSession()

@@ -30,6 +30,13 @@ class FoundationTests(unittest.TestCase):
     def task(self, environment=None):
         return self.core.create_task('诊断检查', environment or self.environment, 'diagnostic-demo', '1.0.0')
 
+    def plan(self, task, command='diagnose', action_id='enter-diagnostic'):
+        operation={'action':'exec','role':'controller','command':command}
+        if action_id:operation['action_id']=action_id
+        plan=self.core.propose_preview(task,'诊断','读取状态','检查输出',[operation])
+        self.core.approve_preview(task,plan)
+        return json.dumps(operation)
+
     def test_duplicate_device_alias_cannot_bypass_reservation(self):
         with self.assertRaises(DomainError):
             self.core.device('别名', 'SIM://A')
@@ -45,13 +52,14 @@ class FoundationTests(unittest.TestCase):
     def test_waiting_retains_reservation_and_approval_is_one_use(self):
         task = self.task()
         self.core.claim(task)
-        operation = self.core.request_operation(task, self.device, 'diagnose', 'enter-diagnostic')
+        command=self.plan(task)
+        operation = self.core.request_operation(task, self.device, command, 'enter-diagnostic')
         self.assertEqual(self.core.task(task)['status'], 'waiting_user')
         self.assertFalse(self.core.claim(self.task()))
         with self.assertRaises(DomainError):
             self.core.consume_operation(task, operation)
         self.core.approve(task, operation)
-        self.assertEqual(self.core.consume_operation(task, operation)['command'], 'diagnose')
+        self.assertEqual(self.core.consume_operation(task, operation)['command'], command)
         with self.assertRaises(DomainError):
             self.core.consume_operation(task, operation)
 
@@ -60,7 +68,8 @@ class FoundationTests(unittest.TestCase):
         self.core.claim(task)
         with self.assertRaises(DomainError):
             self.core.request_operation(task, 'unbound', 'diagnose')
-        operation = self.core.request_operation(task, self.device, 'diagnose', 'enter-diagnostic')
+        command=self.plan(task)
+        operation = self.core.request_operation(task, self.device, command, 'enter-diagnostic')
         with self.assertRaises(DomainError):
             self.core.approve(self.task(), operation)
 
@@ -80,7 +89,10 @@ class FoundationTests(unittest.TestCase):
         request = self.core.events(task)[-1]['payload']['id']
         sim.execute(task)
         self.assertEqual(self.core.task(task)['status'], 'waiting_user')
-        self.core.approve(task, request)
+        self.core.approve_preview(task, request)
+        sim.execute(task)
+        operation=self.core.events(task)[-1]['payload']['id']
+        self.core.approve(task,operation)
         sim.execute(task)
         self.assertEqual(self.core.task(task)['status'], 'succeeded')
         events = self.core.events(task)
@@ -98,6 +110,9 @@ class FoundationTests(unittest.TestCase):
         try:
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
+                for t in (first,second):
+                    for plan in self.core.previews(t):
+                        if plan['status']=='pending':self.core.approve_preview(t,plan['id'])
                 if all(self.core.task(t)['status'] == 'succeeded' for t in (first, second)):
                     break
                 time.sleep(.02)
@@ -144,7 +159,7 @@ class FoundationTests(unittest.TestCase):
     def test_stop_invalidates_pending_approval(self):
         task=self.task()
         self.core.claim(task)
-        operation=self.core.request_operation(task,self.device,'diagnose','enter-diagnostic')
+        operation=self.core.request_operation(task,self.device,self.plan(task),'enter-diagnostic')
         self.core.stop_simulation(task)
         with self.assertRaises(DomainError):
             self.core.approve(task,operation)

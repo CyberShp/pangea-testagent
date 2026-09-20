@@ -5,9 +5,10 @@ import shlex
 import time
 from .core import DomainError
 from .ssh import Cancelled, SSHExecutor
+from .execution import OPERATION_SCHEMA, REMOTE_ACTIONS, validate_operation
 
 ACTIONS = ['skill_read','files','file_read','artifact_write','exec','shell_open','shell_send','shell_close',
-           'remote_read','remote_write','upload','download','script','wait_connected','step','check','ask','finish']
+           'remote_read','remote_write','upload','download','script','wait_connected','step','check','ask','finish','preview']
 TOOL = {'name':'testagent','description': '统一测试任务工具。所有设备操作必须通过此工具；role 来自任务绑定。先读取 Skill 和附件，按约定上报步骤与检查，最后 finish。',
         'inputSchema': {'type':'object','properties': {
             'action':{'type':'string','enum':ACTIONS}, 'role':{'type':'string'}, 'action_id':{'type':'string'},
@@ -16,7 +17,9 @@ TOOL = {'name':'testagent','description': '统一测试任务工具。所有设�
             'path':{'type':'string'}, 'file_id':{'type':'string'}, 'name':{'type':'string'},
             'args':{'type':'array','items':{'type':'string'}}, 'step_id':{'type':'string'},
             'check_id':{'type':'string'},'passed':{'type':'boolean'},'evidence_operation':{'type':'string'},
-            'summary':{'type':'string'}},'required':['action'],'additionalProperties':False}}
+            'summary':{'type':'string'}, 'impact':{'type':'string'}, 'verification':{'type':'string'},
+            'capture_id':{'type':'string'}, 'capture_phase':{'enum':['before','after']},
+            'operations':{'type':'array','maxItems':200,'items':OPERATION_SCHEMA}},'required':['action'],'additionalProperties':False}}
 
 
 class Gateway:
@@ -25,9 +28,12 @@ class Gateway:
         self.task,self.cancelled,self.readonly=task,cancelled,readonly
         self.executor=SSHExecutor(self.catalog,task,cancelled,self.emit)
         self.finished=False
+        self.active_operation=None
         self.call_lock=__import__('threading').Lock()
 
     def emit(self,kind,payload):
+        if kind=='tool.output' and self.active_operation:
+            payload={**payload,**self.active_operation}
         with self.core.tx(): self.core.emit(self.task,kind,payload)
 
     def snapshot(self): return self.core.task(self.task)['snapshot']
@@ -60,6 +66,17 @@ class Gateway:
                 if name not in files: raise DomainError('Skill 文件不存在')
                 return {'path':name,'text':files[name]}
             if action=='files': return self.catalog.files(self.task)
+            if action=='preview':
+                plan_id=self.core.propose_preview(self.task,args['summary'],args['impact'],args['verification'],args['operations'])
+                while not self.cancelled.wait(.15):
+                    with self.core.lock:
+                        row=self.core.db.execute('SELECT status FROM previews WHERE id=?',(plan_id,)).fetchone()
+                    if self.core.task(self.task)['status'] in ('failed','stopped','stopping'):
+                        raise Cancelled('任务已终止')
+                    if row['status']=='approved': return {'preview_id':plan_id,'approved':True}
+                    if row['status']=='superseded':
+                        return {'approved':False,'new_user_instructions':self.catalog.drain_messages(self.task),'next':'重新生成变更预览'}
+                raise Cancelled('任务已停止')
             if action=='file_read':
                 info,path=self.catalog.file(self.task,args['file_id'])
                 if info['size']>2*1024*1024: raise DomainError('模型读取文件限 2 MiB，请使用下载或脚本处理')
@@ -108,13 +125,21 @@ class Gateway:
                 self.emit('agent.summary',{'text':args.get('summary','任务执行结束')})
                 return {'finish_requested':True}
             role=args.get('role')
+            validate_operation(args,self.snapshot())
             device=self.snapshot()['roles'].get(role)
             if not device: raise DomainError('未知设备角色')
+            if args.get('capture_id'):
+                with self.core.lock:
+                    exists=self.core.db.execute('SELECT 1 FROM config_captures WHERE task_id=? AND comparison_id=? AND phase=?',
+                        (self.task,args['capture_id'],args['capture_phase'])).fetchone()
+                if exists:raise DomainError('配置采集证据已经保存，不能覆盖')
             operation=self.core.request_operation(self.task,device,json.dumps(args,ensure_ascii=False),args.get('action_id'),force_confirm=False)
             while not self.cancelled.wait(.1):
                 with self.core.lock:
                     row=self.core.db.execute('SELECT status FROM approvals WHERE id=?',(operation,)).fetchone()
                 if row and row[0]=='approved': break
+                if row and row[0]=='finished':
+                    return {'not_executed':True,'new_user_instructions':self.catalog.drain_messages(self.task),'next':'重新生成变更预览'}
                 if self.core.task(self.task)['status'] in ('failed','stopped','stopping'): raise Cancelled('任务已终止')
             if self.cancelled.is_set(): raise Cancelled('任务已停止')
             pending=self.catalog.drain_messages(self.task)
@@ -125,6 +150,7 @@ class Gateway:
                     self.core.emit(self.task,'operation.superseded',{'id':operation,'reason':'用户有新要求，需重新规划'})
                 return {'not_executed':True,'new_user_instructions':pending}
             self.core.consume_operation(self.task,operation)
+            self.active_operation={'id':operation,'device_id':device}
             timeout=args.get('timeout',300)
             try:
                 if action=='exec': result=self.executor.exec(device,args['command'],timeout,operation)
@@ -153,7 +179,13 @@ class Gateway:
                     result=self.executor.exec(device,'sh '+shlex.quote(remote)+' '+ ' '.join(shlex.quote(x) for x in args.get('args',[])),timeout,operation)
                 else: raise DomainError('不支持的工具操作')
                 self.core.record_result(self.task,operation,result)
+                if args.get('capture_id'):
+                    self.catalog.capture(self.task,args,operation,result)
                 return {'operation_id':operation,**result}
             except Exception as exc:
-                self.core.record_result(self.task,operation,{'error':str(exc)})
+                with self.core.lock:
+                    unfinished=self.core.db.execute("SELECT 1 FROM approvals WHERE id=? AND status='consumed'",(operation,)).fetchone()
+                if unfinished:self.core.record_result(self.task,operation,{'error':str(exc)})
                 raise
+            finally:
+                self.active_operation=None

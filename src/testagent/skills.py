@@ -76,6 +76,31 @@ def validate(package):
     recovery = contract.get('recovery')
     if recovery is not None and not isinstance(recovery, str):
         errors.append('recovery 必须是恢复方法说明文本')
+    from jsonschema import validate as validate_schema
+    from .execution import OPERATION_SCHEMA
+    try:
+        topology = contract.get('topology', [])
+        validate_schema(topology, {'type':'array','maxItems':200,'items':{'type':'object','additionalProperties':False,
+            'properties':{'from':{'type':'string'},'to':{'type':'string'},'label':{'type':'string'}},'required':['from','to']}})
+        for link in topology:
+            if link['from'] not in ids['roles'] or link['to'] not in ids['roles'] or link['from']==link['to']:
+                errors.append('拓扑连线必须引用两个不同的已声明角色')
+        comparisons=contract.get('comparisons', [])
+        validate_schema(comparisons, {'type':'array','maxItems':50,'items':{'type':'object','additionalProperties':False,
+            'properties':{'id':{'type':'string','pattern':'^[a-z0-9][a-z0-9_-]{0,63}$'},'name':{'type':'string'},
+                          'role':{'type':'string'},'operation':{'type':'object'}},'required':['id','role','operation']}})
+        seen=set()
+        for comparison in comparisons:
+            if comparison['id'] in seen:errors.append('配置对比 id 不能重复')
+            seen.add(comparison['id'])
+            if comparison['role'] not in ids['roles']:errors.append('配置对比引用了未声明的角色')
+            op=comparison['operation']
+            validate_schema({'role':comparison['role'],**op},OPERATION_SCHEMA)
+            if op['action'] not in ('exec','shell_send','remote_read') or any(k in op for k in ('role','session_id','capture_id','capture_phase','expect_disconnect')):
+                errors.append('配置采集仅支持 exec、shell_send 或 remote_read，角色由 comparison.role 指定')
+            if op['action']=='shell_send' and not op.get('expect'):errors.append('终端配置采集必须声明 expect')
+    except Exception as exc:
+        errors.append('拓扑或配置采集声明无效：'+str(exc).splitlines()[0])
     return {"mode": "invalid" if errors else "structured", "errors": errors}
 
 

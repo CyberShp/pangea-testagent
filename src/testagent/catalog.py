@@ -132,6 +132,17 @@ class Catalog:
     def state(self):
         with self.core.lock:
             state = self.core.overview()
+            roles = {}
+            for row in self.core.db.execute('SELECT package FROM skills ORDER BY id,version'):
+                package = json.loads(row['package'])
+                contract = json.loads(package['files'].get('contract.json', '{}'))
+                for role in contract.get('roles', []):
+                    name = role.get('name')
+                    name = name.strip() if isinstance(name, str) else ''
+                    ident = role['id']
+                    if ident not in roles or (not roles[ident]['name'] and name):
+                        roles[ident] = {'id': ident, 'name': name}
+            state['skill_roles'] = [roles[ident] for ident in sorted(roles)]
             state['devices'] = [dict(r) for r in self.core.db.execute('SELECT d.*,s.port,s.username,s.fingerprint,s.credential FROM devices d LEFT JOIN device_settings s ON d.id=s.id')]
             for device in state['devices']:
                 device['has_password'] = bool(self.vault.get(device.pop('credential')))
@@ -201,6 +212,13 @@ class Catalog:
                 raise DomainError('任务已结束，请新建任务')
             self.core.db.execute('INSERT INTO messages(task_id,text) VALUES(?,?)', (task,text))
             self.core.emit(task, 'user.message', {'text': text})
+            changed=self.core.db.execute("UPDATE previews SET status='superseded' WHERE task_id=? AND status IN ('pending','approved')",(task,)).rowcount
+            if changed:
+                for row in self.core.db.execute("SELECT id FROM approvals WHERE task_id=? AND status IN ('pending','approved')",(task,)).fetchall():
+                    self.core.db.execute("UPDATE approvals SET status='finished' WHERE id=?",(row['id'],))
+                    self.core.emit(task,'operation.superseded',{'id':row['id'],'reason':'用户调整了要求，需要重新预览'})
+                self.core.db.execute("UPDATE tasks SET status='running' WHERE id=? AND status='waiting_user'",(task,))
+                self.core.emit(task,'preview.superseded',{'reason':'用户调整了要求，需要重新预览'})
 
     def drain_messages(self, task):
         with self.core.tx():
@@ -215,7 +233,7 @@ class Catalog:
                 raise DomainError('活动或现场待处理任务不能删除')
             if self.core.db.execute("SELECT 1 FROM recovery WHERE task_id=? AND status IN ('planning','running','proposed')", (task,)).fetchone():
                 raise DomainError('请先处理恢复方案')
-            for table in ('events','checks','steps','approvals','messages','artifacts','process_handles'):
+            for table in ('config_captures','previews','events','checks','steps','approvals','messages','artifacts','process_handles'):
                 self.core.db.execute(f'DELETE FROM {table} WHERE task_id=?', (task,))
             self.core.db.execute('DELETE FROM recovery WHERE task_id=? OR child_id=?', (task,task))
             self.core.db.execute('DELETE FROM tasks WHERE id=?', (task,))
@@ -241,7 +259,21 @@ class Catalog:
         for event in events:
             lines += [f"### {event['seq']} · {event['kind']} · {event['at']}", '', '```json', json.dumps(event['payload'],ensure_ascii=False,indent=2), '```','']
         stream=io.BytesIO()
+        from .execution import comparisons
+        changes=comparisons(self.core,task)
+        plans=self.core.previews(task)
+        lines += ['## 配置前后对比', '']
+        for change in changes:
+            lines += ['### '+change['name'], '角色：'+change['role'],
+                      ('有配置差异' if change['changed'] else '采集结果一致') if change['available'] else '无法对比：缺少执行前或执行后采集结果', '']
+            if change['available']:lines += ['```diff',change['diff'],'```','']
         with zipfile.ZipFile(stream,'w',zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('previews.json',json.dumps(self.vault.redact_tree(plans),ensure_ascii=False,indent=2))
+            archive.writestr('comparisons.json',json.dumps(self.vault.redact_tree(changes),ensure_ascii=False,indent=2))
+            for index,change in enumerate(changes,1):
+                for phase in ('before','after'):
+                    if change[phase]:archive.writestr(f'comparisons/{index}/{phase}.txt',self.vault.redact(change[phase]['text']))
+                if change['available']:archive.writestr(f'comparisons/{index}/change.diff',self.vault.redact(change['diff']))
             archive.writestr('report.md',self.vault.redact('\n'.join(lines)))
             archive.writestr('events.json',json.dumps(self.vault.redact_tree(events),ensure_ascii=False,indent=2))
             safe_task = dict(item)
@@ -249,3 +281,19 @@ class Catalog:
             archive.writestr('task.json',json.dumps(self.vault.redact_tree(safe_task),ensure_ascii=False,indent=2))
             archive.writestr('files.json',json.dumps(self.files(task),ensure_ascii=False,indent=2))
         return stream.getvalue()
+
+    def capture(self, task, operation, evidence, result):
+        text=result.get({'exec':'stdout','shell_send':'output','remote_read':'text'}[operation['action']])
+        if not isinstance(text,str) or len(text.encode('utf-8'))>2*1024*1024:
+            raise DomainError('配置采集结果必须是 2 MiB 以内的文本')
+        if operation['action']=='shell_send' and result.get('completion')!='prompt_match':
+            raise DomainError('配置采集没有完成提示符，不能作为对比依据')
+        with self.core.tx():
+            row=self.core.db.execute("SELECT operation FROM approvals WHERE id=? AND task_id=? AND status='finished'",(evidence,task)).fetchone()
+            if not row or json.loads(json.loads(row['operation'])['command'])!=operation:
+                raise DomainError('配置采集与执行证据不一致')
+            if self.core.db.execute('SELECT 1 FROM config_captures WHERE task_id=? AND comparison_id=? AND phase=?',(task,operation['capture_id'],operation['capture_phase'])).fetchone():
+                raise DomainError('配置采集证据已经保存，不能覆盖')
+            self.core.db.execute('INSERT INTO config_captures VALUES(?,?,?,?,?)',
+                (task,operation['capture_id'],operation['capture_phase'],evidence,self.vault.redact(text)))
+            self.core.emit(task,'config.captured',{'comparison_id':operation['capture_id'],'phase':operation['capture_phase'],'operation_id':evidence,'role':operation['role']})

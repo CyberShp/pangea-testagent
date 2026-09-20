@@ -53,6 +53,8 @@ class Core:
           CREATE TABLE IF NOT EXISTS recovery(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), plan TEXT, status TEXT, child_id TEXT, created TEXT);
           CREATE TABLE IF NOT EXISTS process_handles(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), device_id TEXT, details TEXT, active INTEGER);
           CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+          CREATE TABLE IF NOT EXISTS previews(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), data TEXT, status TEXT, position INTEGER DEFAULT 0, created TEXT);
+          CREATE TABLE IF NOT EXISTS config_captures(task_id TEXT REFERENCES tasks(id), comparison_id TEXT, phase TEXT, operation_id TEXT REFERENCES approvals(id), text TEXT, PRIMARY KEY(task_id,comparison_id,phase));
         """)
 
     @contextmanager
@@ -180,6 +182,7 @@ class Core:
             task = self.task(ident)
             if task["status"] != "running":
                 raise DomainError("任务当前不能发起操作")
+            plan = self._matching_preview(ident, device_id, command)
             row = self.db.execute("SELECT task_id FROM reservations WHERE device_id=?", (device_id,)).fetchone()
             if device_id not in task["snapshot"]["roles"].values() or not row or row[0] != ident:
                 raise DomainError("目标设备不属于本任务或未获得占用")
@@ -189,6 +192,7 @@ class Core:
                 raise DomainError("关键操作未在 Skill 中声明")
             confirm = force_confirm or (task["snapshot"]["policy"] == "confirm" and (action_id is not None or task["snapshot"]["mode"] == "ordinary"))
             operation = {"device_id": device_id, "command": command, "action_id": action_id,
+                         "preview_id": plan['id'], "preview_position": plan['position'],
                          "description": actions.get(action_id, {}).get("description", "普通 Skill 操作确认")}
             operation_id = new_id()
             self.db.execute("INSERT INTO approvals VALUES(?,?,?,?)", (operation_id, ident, json.dumps(operation),
@@ -216,6 +220,10 @@ class Core:
                 raise DomainError("操作未授权、已执行或任务不在执行中")
             self.db.execute("UPDATE approvals SET status='consumed' WHERE id=?", (operation_id,))
             operation = json.loads(row["operation"])
+            plan = self._matching_preview(ident, operation['device_id'], operation['command'])
+            if plan['id'] != operation['preview_id'] or plan['position'] != operation['preview_position']:
+                raise DomainError('操作预览已变化，需要重新确认')
+            self.db.execute('UPDATE previews SET position=position+1 WHERE id=?', (plan['id'],))
             self.db.execute("UPDATE tasks SET scene='unknown' WHERE id=?", (ident,))
             self.emit(ident, "tool.started", {"id": operation_id, **operation})
             return operation
@@ -227,6 +235,72 @@ class Core:
                 raise DomainError("没有对应的执行操作")
             self.db.execute("UPDATE approvals SET status='finished' WHERE id=?", (operation_id,))
             self.emit(ident, "tool.finished", {"id": operation_id, "output": output})
+
+    def previews(self, ident):
+        with self.lock:
+            return [{**dict(r), 'data': json.loads(r['data'])} for r in self.db.execute('SELECT * FROM previews WHERE task_id=? ORDER BY created', (ident,))]
+
+    def propose_preview(self, ident, summary, impact, verification, operations):
+        from .execution import validate_operation, canonical
+        with self.tx():
+            task = self.task(ident)
+            if task['status'] != 'running':
+                raise DomainError('任务当前不能生成预览')
+            if any(not isinstance(text, str) or not text.strip() for text in (summary, impact, verification)):
+                raise DomainError('预览需要变更说明、影响和验证方法')
+            if not isinstance(operations, list) or len(operations) > 200:
+                raise DomainError('预览操作必须是数组，最多 200 项')
+            if self.db.execute("SELECT 1 FROM approvals WHERE task_id=? AND status!='finished'", (ident,)).fetchone():
+                raise DomainError('请先结束当前操作')
+            for operation in operations:
+                validate_operation(operation, task['snapshot'], simulation=task['snapshot']['backend'] == 'simulation')
+            data = {'summary': summary, 'impact': impact, 'verification': verification,
+                    'operations': [canonical(op) for op in operations]}
+            # The exact reviewed content must remain executable after credential redaction.
+            if self.sanitize(data) != data:
+                raise DomainError('预览含已保存凭据，请使用框架管理的凭据')
+            plan_id = new_id()
+            self.db.execute("UPDATE previews SET status='superseded' WHERE task_id=? AND status='approved'", (ident,))
+            self.db.execute("INSERT INTO previews VALUES(?,?,?,'pending',0,?)", (plan_id, ident, json.dumps(data, ensure_ascii=False), now()))
+            self.db.execute("UPDATE tasks SET status='waiting_user' WHERE id=?", (ident,))
+            self.emit(ident, 'preview.requested', {'id': plan_id, **data})
+            return plan_id
+
+    def approve_preview(self, ident, plan_id):
+        with self.tx():
+            task = self.task(ident)
+            row = self.db.execute('SELECT * FROM previews WHERE id=? AND task_id=?', (plan_id, ident)).fetchone()
+            if task['status'] != 'waiting_user' or not row or row['status'] != 'pending':
+                raise DomainError('变更预览已失效或不属于该任务')
+            if self.db.execute('SELECT 1 FROM messages WHERE task_id=? AND consumed=0', (ident,)).fetchone():
+                raise DomainError('有新要求待处理，请等待 Agent 更新预览')
+            self.db.execute("UPDATE previews SET status='approved' WHERE id=?", (plan_id,))
+            self.db.execute("UPDATE tasks SET status='running' WHERE id=?", (ident,))
+            self.emit(ident, 'preview.approved', {'id': plan_id})
+
+    def _matching_preview(self, ident, device, command):
+        from .execution import canonical
+        row = self.db.execute("SELECT * FROM previews WHERE task_id=? AND status='approved'", (ident,)).fetchone()
+        if not row:
+            raise DomainError('设备操作前必须确认变更预览')
+        operations = json.loads(row['data'])['operations']
+        try:
+            actual = canonical(json.loads(command))
+            expected = operations[row['position']]
+        except (ValueError, IndexError, TypeError):
+            raise DomainError('操作超出已确认预览，请重新生成预览')
+        if actual != expected or self.task(ident)['snapshot']['roles'].get(expected['role']) != device:
+            raise DomainError('操作与已确认预览不一致，请重新生成预览')
+        return row
+
+    def reject_preview(self, ident, plan_id):
+        with self.tx():
+            row=self.db.execute('SELECT status FROM previews WHERE id=? AND task_id=?',(plan_id,ident)).fetchone()
+            if self.task(ident)['status']!='waiting_user' or not row or row['status']!='pending':
+                raise DomainError('变更预览已失效或不属于该任务')
+            self.db.execute("UPDATE previews SET status='rejected' WHERE id=?",(plan_id,))
+            self.db.execute("UPDATE tasks SET status='failed' WHERE id=?",(ident,))
+            self.emit(ident,'task.failed',{'reason':'用户拒绝变更预览'})
 
     def complete_step(self, ident, step_id):
         with self.tx():
@@ -253,6 +327,9 @@ class Core:
             task = self.task(ident)
             if task["status"] != "running":
                 raise DomainError("任务当前不能完成")
+            plan = self.db.execute("SELECT * FROM previews WHERE task_id=? AND status='approved'", (ident,)).fetchone()
+            if not plan or plan['position'] != len(json.loads(plan['data'])['operations']):
+                raise DomainError('变更预览尚未确认或仍有未执行操作')
             contract = json.loads(task["snapshot"]["skill"]["files"].get("contract.json", "{}"))
             checks = {r[0]: r[1] for r in self.db.execute("SELECT id,passed FROM checks WHERE task_id=?", (ident,))}
             steps = {r[0] for r in self.db.execute("SELECT id FROM steps WHERE task_id=?", (ident,))}
@@ -271,6 +348,7 @@ class Core:
             if self.task(ident)["status"] in ("succeeded", "failed", "stopped"):
                 return
             self.db.execute("UPDATE tasks SET status='failed',scene='unknown' WHERE id=?", (ident,))
+            self.db.execute("UPDATE previews SET status='cancelled' WHERE task_id=? AND status='pending'",(ident,))
             self.emit(ident, "task.failed", {"reason": reason})
 
     def stop_simulation(self, ident):
@@ -280,6 +358,7 @@ class Core:
             if task["snapshot"]["backend"] != "simulation" or task["status"] in ("failed", "succeeded", "stopped"):
                 raise DomainError("任务不能通过模拟停止入口终止")
             self.db.execute("UPDATE tasks SET status='stopped',scene='clean' WHERE id=?", (ident,))
+            self.db.execute("UPDATE previews SET status='cancelled' WHERE task_id=? AND status='pending'",(ident,))
             self.db.execute("DELETE FROM reservations WHERE task_id=?", (ident,))
             self.emit(ident, "task.stopped", {"evidence": "模拟器不创建远端进程；不代表真实脚本终止能力"})
 
@@ -288,6 +367,7 @@ class Core:
             rows = list(self.db.execute("SELECT id FROM tasks WHERE status IN ('queued','running','waiting_user','stopping')"))
             for row in rows:
                 self.db.execute("UPDATE tasks SET status='failed',scene='unknown' WHERE id=?", (row[0],))
+                self.db.execute("UPDATE previews SET status='cancelled' WHERE task_id=? AND status='pending'",(row[0],))
                 self.emit(row[0], "task.failed", {"reason": "后台服务中断；不自动续跑，已有设备占用保留"})
             for recovery in list(self.db.execute("SELECT * FROM recovery WHERE status IN ('planning','running')")):
                 self.db.execute("UPDATE recovery SET status='failed' WHERE id=?", (recovery['id'],))

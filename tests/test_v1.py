@@ -106,6 +106,25 @@ class V1Tests(unittest.TestCase):
         self.assertEqual(len(self.catalog.state()['devices']),before)
         self.assertEqual(len(self.catalog.state()['environments']),2)
 
+    def test_skill_roles_deduplicate_and_keep_existing_environment_bindings(self):
+        package = json.loads(json.dumps(self.package))
+        package['version'] = '2.0.0'
+        contract = json.loads(package['files']['contract.json'])
+        contract['roles'] = [{'id': 'controller', 'name': '模拟控制器'},
+                             {'id': 'switch', 'name': '交换机'}, {'id': 'server'}]
+        package['files']['contract.json'] = json.dumps(contract)
+        self.core.import_skill(package)
+        self.core.import_skill({'id': 'ordinary', 'version': '1', 'name': '普通',
+                                'files': {'SKILL.md': '说明'}})
+        self.assertEqual(self.catalog.state()['skill_roles'], [
+            {'id': 'controller', 'name': '模拟控制器'},
+            {'id': 'server', 'name': ''}, {'id': 'switch', 'name': '交换机'}])
+        with self.core.tx():
+            self.core.db.execute('DELETE FROM skills')
+        state = self.catalog.state()
+        self.assertEqual(state['skill_roles'], [])
+        self.assertEqual(json.loads(state['environments'][0]['roles']), {'controller': self.device})
+
     def test_openai_streamed_function_call_and_models(self):
         class API(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
@@ -152,11 +171,13 @@ class V1Tests(unittest.TestCase):
             models=runtime.models(profile)
             self.assertEqual(models['models'],['fixture-model'])
             task=self.task(profile)
+            until(lambda:bool(self.core.previews(task)),10)
+            self.core.approve_preview(task,self.core.previews(task)[-1]['id'])
             until(lambda:self.core.task(task)['status'] in ('failed','succeeded'),10)
             self.assertEqual(self.core.task(task)['status'],'succeeded',self.core.events(task))
         finally:runtime.close();server.shutdown();server.server_close();until(lambda:not runtime.runs)
 
-    @unittest.skipIf(os.name=='nt','Local POSIX command fixture')
+    @unittest.skipUnless(sys.platform=='linux','Process tracking fixture requires Linux setsid and /proc')
     def test_openai_to_ssh_task_end_to_end(self):
         fixture,executor,_=self.ssh_fixture()
         # The helper created a reserved task; release it before creating the runtime task.
@@ -168,7 +189,8 @@ class V1Tests(unittest.TestCase):
             def do_POST(self):
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 results=[m for m in body['messages'] if m['role']=='tool']
-                if len(results)==0:arguments={'action':'exec','role':'controller','command':'printf READY'}
+                if len(results)==0:arguments={'action':'preview','summary':'执行 SSH 检查','impact':'打印 READY','verification':'检查输出','operations':[{'action':'exec','role':'controller','command':'printf READY'}]}
+                elif len(results)==1:arguments={'action':'exec','role':'controller','command':'printf READY'}
                 else:arguments={'action':'finish','summary':'Verified SSH execution'}
                 response={'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[{'id':'call'+str(len(results)), 'type':'function', 'function':{'name':'testagent','arguments':json.dumps(arguments)}}]}}]}
                 raw=json.dumps(response).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(raw)
@@ -178,6 +200,8 @@ class V1Tests(unittest.TestCase):
             profile=self.profile(config={'base_url':f'http://127.0.0.1:{api.server_port}/v1'})
             runtime.start(0)
             task=self.task(profile)
+            until(lambda:bool(self.core.previews(task)),10)
+            self.core.approve_preview(task,self.core.previews(task)[-1]['id'])
             until(lambda:self.core.task(task)['status'] in ('succeeded','failed'),10)
             self.assertEqual(self.core.task(task)['status'],'succeeded',self.core.events(task))
             outputs=[e['payload']['output'] for e in self.core.events(task) if e['kind']=='tool.finished']
@@ -319,7 +343,7 @@ class V1Tests(unittest.TestCase):
             self.assertTrue(self.catalog.state()['devices'][0]['fingerprint'].startswith('SHA256:'))
         finally:executor.close();fixture.close()
 
-    @unittest.skipIf(os.name=='nt','POSIX process groups require the Linux integration fixture')
+    @unittest.skipUnless(sys.platform=='linux','Process tracking fixture requires Linux setsid and /proc')
     def test_real_ssh_exec_and_force_termination(self):
         fixture,executor,_=self.ssh_fixture()
         errors=[]

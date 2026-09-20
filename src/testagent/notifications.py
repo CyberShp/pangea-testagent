@@ -7,6 +7,7 @@ import subprocess
 import threading
 
 LABELS={'task.failed':'任务失败','task.stopped':'任务已停止','approval.requested':'等待操作授权',
+        'preview.requested':'变更预览待确认',
         'input.requested':'等待补充信息','recovery.proposed':'恢复方案待确认'}
 
 

@@ -31,6 +31,7 @@ for line in sys.stdin:
         if bridge:
             reply=mcp('tools/call',{'name':'testagent','arguments':{'action':'files'}})
             assert not reply.get('error'), reply
+            mcp('tools/call',{'name':'testagent','arguments':{'action':'preview','summary':'协议测试','impact':'没有设备操作','verification':'完成协议会话','operations':[]}})
             mcp('tools/call',{'name':'testagent','arguments':{'action':'finish','summary':'Fixture protocol complete'}})
         output({'jsonrpc':'2.0','method':'session/update','params':{'sessionId':'fixture-session','update':{'sessionUpdate':'agent_message_chunk','content':{'type':'text','text':'Fixture completed'}}}})
         result={'stopReason':'end_turn'}
