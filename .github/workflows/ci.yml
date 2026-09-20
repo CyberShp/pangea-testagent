@@ -60,15 +60,25 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
-                if ($health.version -eq '1.0.1') { $ready = $true; break }
+                if ($health.version -eq '1.0.2') { $ready = $true; break }
               } catch { }
             }
             if (-not $ready) { throw 'Packaged server did not become ready' }
           } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-v1-windows-x64
+          name: pangea-testagent-1.0.2-full-windows-x64
           path: |
-            dist/*.zip
-            dist/*.sha256
+            dist/*-windows-x64-portable.zip
+            dist/*-windows-x64-portable.zip.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pangea-testagent-1.0.2-patch-windows-x64
+          path: |
+            dist/*-windows-x64-patch.zip
+            dist/*-windows-x64-patch.zip.sha256
+            dist/Prepare-Patch.*
+            dist/prepare-patch.py
+            dist/PATCH-README.txt
           if-no-files-found: error

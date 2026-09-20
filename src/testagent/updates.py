@@ -32,8 +32,8 @@ class Updates:
                 seen.add(name.casefold())
             names={e.filename for e in entries}
             if 'update-manifest.json' not in names:
-                if any(name.endswith('-windows-x64-update.zip') for name in names):
-                    raise DomainError('这是构建产物外层 ZIP。请先解压，再选择其中的 windows-x64-update.zip 导入')
+                if any(name.endswith(('-windows-x64-update.zip','-windows-x64-patch.zip','-windows-x64-portable.zip')) for name in names):
+                    raise DomainError('这是构建产物外层 ZIP。请先解压，再选择其中的 portable.zip 或 patch.zip 导入')
                 if 'app/portable.json' in names:
                     raise DomainError('此完整运行包没有升级清单。请使用同次构建的 windows-x64-update.zip；不要直接导入旧版 portable.zip')
                 raise DomainError('缺少 update-manifest.json，请选择 testagent 升级包或带升级清单的完整运行包')
@@ -43,6 +43,11 @@ class Updates:
                 raise DomainError('升级清单不是有效的 JSON') from exc
             if not isinstance(manifest,dict) or not isinstance(manifest.get('files'),dict):
                 raise DomainError('升级清单格式错误')
+            if manifest.get('schema_version')==2:
+                from .patching import rebuild_patch
+                try:complete=rebuild_patch(data,ROOT)
+                except (ValueError,KeyError,OSError) as exc:raise DomainError(str(exc)) from exc
+                return self.inspect(complete)
             if manifest.get('product')!='pangea-testagent' or manifest.get('schema_version')!=1: raise DomainError('不是 testagent 升级包')
             if manifest.get('version')==VERSION: raise DomainError('此版本已经安装')
             if set(manifest.get('files',{}))!={e.filename for e in entries if e.filename!='update-manifest.json'}: raise DomainError('升级清单不完整')

@@ -72,4 +72,29 @@ def main():
         target.with_suffix('.zip.sha256').write_text(hashlib.sha256(target.read_bytes()).hexdigest()+'  '+target.name+'\n')
         print(target)
 
+    patch=ROOT/'dist'/f'pangea-testagent-{VERSION}-windows-x64-patch.zip'
+    all_files={f.relative_to(stage).as_posix():f for f in app.rglob('*') if f.is_file()}
+    manifest={'product':'pangea-testagent','schema_version':2,'kind':'application-patch','version':VERSION,
+              'runtime':'cpython-3.12.10-win-amd64','files':{},'runtime_files':{}}
+    with zipfile.ZipFile(patch,'w',zipfile.ZIP_DEFLATED) as archive:
+        for name,file in sorted(all_files.items()):
+            digest=hashlib.sha256(file.read_bytes()).hexdigest()
+            if name.startswith('app/runtime/'):manifest['runtime_files'][name]=digest
+            else:
+                archive.write(file,name);manifest['files'][name]=digest
+        archive.writestr('update-manifest.json',json.dumps(manifest,indent=2))
+    patch.with_suffix('.zip.sha256').write_text(hashlib.sha256(patch.read_bytes()).hexdigest()+'  '+patch.name+'\n')
+    helpers=ROOT/'dist'
+    shutil.copy2(ROOT/'src/testagent/patching.py',helpers/'prepare-patch.py')
+    (helpers/'Prepare-Patch.ps1').write_text(r"""$ErrorActionPreference = 'Stop'
+$install = Read-Host 'Testagent install folder (contains app)'
+$app = Join-Path $install.Trim('"') 'app'
+& (Join-Path $app 'runtime\python.exe') (Join-Path $PSScriptRoot 'prepare-patch.py') --app $app --patch (Join-Path $PSScriptRoot 'PATCHNAME') --output (Join-Path $PSScriptRoot 'compatible-update.zip')
+if ($LASTEXITCODE -ne 0) { throw 'Patch preparation failed. No installation files were changed.' }
+Read-Host 'Import compatible-update.zip in the running Testagent web UI. Press Enter to close'
+""".replace('PATCHNAME',patch.name),encoding='utf-8-sig')
+    (helpers/'Prepare-Patch.cmd').write_bytes(b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Prepare-Patch.ps1"\r\nif errorlevel 1 pause\r\n')
+    (helpers/'PATCH-README.txt').write_text('1.0.2 及以上：网页直接导入 patch.zip。\n1.0.0/1.0.1：先启动原程序，双击 Prepare-Patch.cmd，填写原安装目录；生成 compatible-update.zip 后在原网页导入。\n补丁复用原运行时，只更新应用文件；运行时不匹配时请使用完整包。准备脚本不会修改原安装或用户数据。\n',encoding='utf-8-sig')
+    print(patch)
+
 if __name__=='__main__':main()

@@ -18,6 +18,26 @@ def main():
         expected=file.with_suffix('.zip.sha256').read_text().split()[0]
         assert hashlib.sha256(file.read_bytes()).hexdigest()==expected
         with zipfile.ZipFile(file) as archive:assert archive.testzip() is None
+    from testagent.patching import rebuild_patch
+    delta=ROOT/'dist'/f'pangea-testagent-{VERSION}-windows-x64-patch.zip'
+    with zipfile.ZipFile(delta) as archive:
+        assert not any(n.startswith('app/runtime/') for n in archive.namelist())
+    rebuilt=rebuild_patch(delta.read_bytes(),ROOT/'dist/portable/app')
+    import io
+    with zipfile.ZipFile(io.BytesIO(rebuilt)) as actual,zipfile.ZipFile(update) as expected:
+        assert set(actual.namelist())==set(expected.namelist())
+        for name in actual.namelist():
+            if name=='update-manifest.json':assert json.loads(actual.read(name))==json.loads(expected.read(name))
+            else:assert actual.read(name)==expected.read(name),name
+    if sys.platform=='win32':
+        import subprocess
+        output=ROOT/'build'/'compatible-update.zip'
+        output.parent.mkdir(exist_ok=True)
+        subprocess.run([str(ROOT/'dist/portable/app/runtime/python.exe'),str(ROOT/'dist/prepare-patch.py'),
+                        '--app',str(ROOT/'dist/portable/app'),'--patch',str(delta),'--output',str(output)],check=True)
+        with zipfile.ZipFile(output) as converted:
+            assert json.loads(converted.read('update-manifest.json'))['schema_version']==1
+    print('PASS: runtime-free patch rebuilds the complete update byte-for-byte per app file.')
     with zipfile.ZipFile(portable) as full,zipfile.ZipFile(update) as patch:
         names=set(full.namelist())
         for name in ('Start-Testagent.cmd','app/entry.py','app/runtime/python312.zip','app/runtime/python312.dll','app/runtime/LICENSE.txt','app/src/testagent/server.py','app/web/app.js','app/skills/testagent-skill-author/SKILL.md','app/apply-update.ps1'):
