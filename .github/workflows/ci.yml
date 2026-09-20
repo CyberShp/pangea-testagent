@@ -46,6 +46,8 @@ jobs:
       - name: Build portable runtime
         shell: pwsh
         run: ./scripts/build-windows.ps1
+      - name: Verify portable and update archives
+        run: python scripts/check-release.py
       - name: Smoke packaged executable
         shell: pwsh
         run: |
@@ -58,7 +60,7 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
-                if ($health.version -eq '1.0.0') { $ready = $true; break }
+                if ($health.version -eq '1.0.1') { $ready = $true; break }
               } catch { }
             }
             if (-not $ready) { throw 'Packaged server did not become ready' }

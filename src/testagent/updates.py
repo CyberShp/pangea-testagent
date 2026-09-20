@@ -19,6 +19,8 @@ class Updates:
         self.pending=None
 
     def inspect(self,data):
+        self.pending=None
+        if not zipfile.is_zipfile(io.BytesIO(data)): raise DomainError('请选择有效的 testagent ZIP 升级包')
         if len(data)>800*1024*1024: raise DomainError('升级包超过 800 MiB')
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             entries=[e for e in archive.infolist() if not e.is_dir()]
@@ -28,7 +30,19 @@ class Updates:
                 name=safe_relative(entry.filename)
                 if name.casefold() in seen or stat.S_ISLNK(entry.external_attr>>16): raise DomainError('升级包路径重复或含链接')
                 seen.add(name.casefold())
-            manifest=json.loads(archive.read('update-manifest.json'))
+            names={e.filename for e in entries}
+            if 'update-manifest.json' not in names:
+                if any(name.endswith('-windows-x64-update.zip') for name in names):
+                    raise DomainError('这是构建产物外层 ZIP。请先解压，再选择其中的 windows-x64-update.zip 导入')
+                if 'app/portable.json' in names:
+                    raise DomainError('此完整运行包没有升级清单。请使用同次构建的 windows-x64-update.zip；不要直接导入旧版 portable.zip')
+                raise DomainError('缺少 update-manifest.json，请选择 testagent 升级包或带升级清单的完整运行包')
+            try:
+                manifest=json.loads(archive.read('update-manifest.json'))
+            except (ValueError,UnicodeError) as exc:
+                raise DomainError('升级清单不是有效的 JSON') from exc
+            if not isinstance(manifest,dict) or not isinstance(manifest.get('files'),dict):
+                raise DomainError('升级清单格式错误')
             if manifest.get('product')!='pangea-testagent' or manifest.get('schema_version')!=1: raise DomainError('不是 testagent 升级包')
             if manifest.get('version')==VERSION: raise DomainError('此版本已经安装')
             if set(manifest.get('files',{}))!={e.filename for e in entries if e.filename!='update-manifest.json'}: raise DomainError('升级清单不完整')
@@ -36,7 +50,7 @@ class Updates:
             embedded={'app/runtime/pythonw.exe','app/runtime/python.exe','app/entry.py','app/portable.json'}
             if 'app/PangeaTestagent.exe' not in entries_set and not embedded.issubset(entries_set): raise DomainError('升级包缺少程序入口')
             for name,expected in manifest['files'].items():
-                if not name.startswith('app/'): raise DomainError('升级包只允许 app 程序目录')
+                if not name.startswith('app/') and name not in ('Start-Testagent.cmd','README.md'): raise DomainError('升级包包含不支持的文件：'+name)
                 if hashlib.sha256(archive.read(name)).hexdigest()!=expected: raise DomainError('升级文件校验失败：'+name)
             stage=self.catalog.root/'updates'/'staged'
             if stage.exists():shutil.rmtree(stage)

@@ -67,8 +67,8 @@ def main():
                 name=file.relative_to(stage).as_posix()
                 if not full and not name.startswith('app/'):continue
                 archive.write(file,name)
-                if name.startswith('app/'):manifest['files'][name]=hashlib.sha256(file.read_bytes()).hexdigest()
-            if not full:archive.writestr('update-manifest.json',json.dumps(manifest,indent=2))
+                manifest['files'][name]=hashlib.sha256(file.read_bytes()).hexdigest()
+            archive.writestr('update-manifest.json',json.dumps(manifest,indent=2))
         target.with_suffix('.zip.sha256').write_text(hashlib.sha256(target.read_bytes()).hexdigest()+'  '+target.name+'\n')
         print(target)
 

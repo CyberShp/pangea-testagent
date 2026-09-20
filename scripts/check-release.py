@@ -30,6 +30,11 @@ def main():
             assert struct.unpack_from('<H',data,pe+4)[0]==0x8664,'Expected AMD64'
         pth=full.read('app/runtime/python312._pth').decode().splitlines()
         assert all(x in pth for x in ('../src','Lib/site-packages','import site'))
+        full_manifest=json.loads(full.read('update-manifest.json'))
+        assert full_manifest['version']==VERSION
+        assert set(full_manifest['files'])==names-{'update-manifest.json'}
+        for name,digest in full_manifest['files'].items():
+            assert hashlib.sha256(full.read(name)).hexdigest()==digest,name
         manifest=json.loads(patch.read('update-manifest.json'))
         assert manifest['version']==VERSION
         assert set(manifest['files'])==set(patch.namelist())-{'update-manifest.json'}

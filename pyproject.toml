@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "testagent"
-version = "1.0.0"
+version = "1.0.1"
 description = "Independent skill-driven test environment workbench"
 requires-python = ">=3.12"
 dependencies = ["paramiko==5.0.0", "cryptography==46.0.0", "jsonschema==4.26.0"]

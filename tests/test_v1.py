@@ -217,7 +217,7 @@ class V1Tests(unittest.TestCase):
     def test_update_manifest_rejects_unlisted_files_and_tampering(self):
         stream=io.BytesIO()
         with zipfile.ZipFile(stream,'w') as archive:
-            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.1','files':{}}))
+            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.2','files':{}}))
             archive.writestr('app/PangeaTestagent.exe',b'tampered')
         with self.assertRaises(DomainError):Updates(self.catalog).inspect(stream.getvalue())
 
@@ -259,10 +259,42 @@ class V1Tests(unittest.TestCase):
         stream=io.BytesIO()
         with zipfile.ZipFile(stream,'w') as archive:
             for name,body in files.items():archive.writestr(name,body)
-            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.1','files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}))
+            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.2','files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}))
         result=Updates(self.catalog).inspect(stream.getvalue())
-        self.assertEqual(result['version'],'1.0.1')
+        self.assertEqual(result['version'],'1.0.2')
         self.assertEqual((Path(result['stage'])/'app/entry.py').read_bytes(),b'pass')
+
+    def test_update_package_type_errors_and_pending_reset(self):
+        updater=Updates(self.catalog)
+        for name,message in [('pangea-testagent-1.0.2-windows-x64-update.zip','外层 ZIP'),
+                             ('app/portable.json','完整运行包没有升级清单'),
+                             ('source.py','缺少 update-manifest.json')]:
+            stream=io.BytesIO()
+            with zipfile.ZipFile(stream,'w') as archive:archive.writestr(name,b'fixture')
+            updater.pending={'version':'stale'}
+            with self.assertRaisesRegex(DomainError,message):updater.inspect(stream.getvalue())
+            self.assertIsNone(updater.pending)
+        with self.assertRaisesRegex(DomainError,'有效的 testagent ZIP'):updater.inspect(b'invalid')
+
+    def test_portable_update_stages_only_verified_app_files(self):
+        import hashlib
+        files={'app/runtime/pythonw.exe':b'fixture','app/runtime/python.exe':b'fixture',
+               'app/entry.py':b'pass','app/portable.json':b'{}',
+               'Start-Testagent.cmd':b'launcher','README.md':b'usage'}
+        def package(tamper=False):
+            stream=io.BytesIO()
+            manifest={'product':'pangea-testagent','schema_version':1,'version':'1.0.2',
+                      'files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}
+            with zipfile.ZipFile(stream,'w') as archive:
+                for name,body in files.items():archive.writestr(name,b'changed' if tamper and name=='README.md' else body)
+                archive.writestr('update-manifest.json',json.dumps(manifest))
+            return stream.getvalue()
+        updater=Updates(self.catalog)
+        result=updater.inspect(package())
+        self.assertEqual((Path(result['stage'])/'app/entry.py').read_bytes(),b'pass')
+        self.assertFalse((Path(result['stage'])/'Start-Testagent.cmd').exists())
+        with self.assertRaisesRegex(DomainError,'升级文件校验失败'):updater.inspect(package(True))
+        self.assertIsNone(updater.pending)
 
     def ssh_fixture(self):
         remote=self.root/'remote';remote.mkdir()
