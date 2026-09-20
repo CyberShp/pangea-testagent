@@ -29,14 +29,12 @@ def main():
         for name in actual.namelist():
             if name=='update-manifest.json':assert json.loads(actual.read(name))==json.loads(expected.read(name))
             else:assert actual.read(name)==expected.read(name),name
+    helper=(ROOT/'dist/portable/app/apply-update.ps1').read_bytes()
+    assert helper.startswith(b'\xef\xbb\xbf'), 'Windows PowerShell requires UTF-8 BOM'
     if sys.platform=='win32':
         import subprocess
-        output=ROOT/'build'/'compatible-update.zip'
-        output.parent.mkdir(exist_ok=True)
-        subprocess.run([str(ROOT/'dist/portable/app/runtime/python.exe'),str(ROOT/'dist/prepare-patch.py'),
-                        '--app',str(ROOT/'dist/portable/app'),'--patch',str(delta),'--output',str(output)],check=True)
-        with zipfile.ZipFile(output) as converted:
-            assert json.loads(converted.read('update-manifest.json'))['schema_version']==1
+        subprocess.run(['powershell.exe','-NoProfile','-Command',
+            "$e=$null;$t=$null;[System.Management.Automation.Language.Parser]::ParseFile('dist/portable/app/apply-update.ps1',[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|Out-String|Write-Error;exit 1}"],check=True)
     print('PASS: runtime-free patch rebuilds the complete update byte-for-byte per app file.')
     with zipfile.ZipFile(portable) as full,zipfile.ZipFile(update) as patch:
         names=set(full.namelist())

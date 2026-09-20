@@ -48,6 +48,12 @@ jobs:
         run: ./scripts/build-windows.ps1
       - name: Verify portable and update archives
         run: python scripts/check-release.py
+      - uses: actions/checkout@v4
+        with:
+          ref: 4dc64ef96cad5c271123cc0f87515f452984de31
+          path: baseline-1.0.2
+      - name: Upgrade released 1.0.2 using downloaded patch
+        run: python scripts/test-windows-upgrade.py
       - name: Smoke packaged executable
         shell: pwsh
         run: |
@@ -60,25 +66,18 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
-                if ($health.version -eq '1.0.2') { $ready = $true; break }
+                if ($health.version -eq '1.0.3') { $ready = $true; break }
               } catch { }
             }
             if (-not $ready) { throw 'Packaged server did not become ready' }
           } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.0.2-full-windows-x64
-          path: |
-            dist/*-windows-x64-portable.zip
-            dist/*-windows-x64-portable.zip.sha256
+          name: pangea-testagent-1.0.3-full-windows-x64
+          path: dist/full-artifact/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.0.2-patch-windows-x64
-          path: |
-            dist/*-windows-x64-patch.zip
-            dist/*-windows-x64-patch.zip.sha256
-            dist/Prepare-Patch.*
-            dist/prepare-patch.py
-            dist/PATCH-README.txt
+          name: pangea-testagent-1.0.3-patch-windows-x64
+          path: dist/patch-artifact/
           if-no-files-found: error

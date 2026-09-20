@@ -18,7 +18,7 @@ class Updates:
         self.catalog,self.core=catalog,catalog.core
         self.pending=None
 
-    def inspect(self,data):
+    def inspect(self,data,_depth=0):
         self.pending=None
         if not zipfile.is_zipfile(io.BytesIO(data)): raise DomainError('请选择有效的 testagent ZIP 升级包')
         if len(data)>800*1024*1024: raise DomainError('升级包超过 800 MiB')
@@ -32,8 +32,11 @@ class Updates:
                 seen.add(name.casefold())
             names={e.filename for e in entries}
             if 'update-manifest.json' not in names:
-                if any(name.endswith(('-windows-x64-update.zip','-windows-x64-patch.zip','-windows-x64-portable.zip')) for name in names):
-                    raise DomainError('这是构建产物外层 ZIP。请先解压，再选择其中的 portable.zip 或 patch.zip 导入')
+                candidates=[n for n in names if n.endswith(('-windows-x64-update.zip','-windows-x64-patch.zip','-windows-x64-portable.zip'))]
+                if candidates:
+                    if _depth>=1 or len(candidates)!=1:
+                        raise DomainError('构建包中包含多个升级包或嵌套过深，请选择单独的完整包或补丁包')
+                    return self.inspect(archive.read(candidates[0]),_depth+1)
                 if 'app/portable.json' in names:
                     raise DomainError('此完整运行包没有升级清单。请使用同次构建的 windows-x64-update.zip；不要直接导入旧版 portable.zip')
                 raise DomainError('缺少 update-manifest.json，请选择 testagent 升级包或带升级清单的完整运行包')
@@ -79,10 +82,15 @@ class Updates:
         if app.name!='app':raise DomainError('程序必须位于完整运行包 app 目录')
         helper=app/'apply-update.ps1'
         if not helper.exists():raise DomainError('升级辅助程序缺失')
-        copied=self.catalog.root/'updates'/'apply-update.ps1';shutil.copy2(helper,copied)
+        copied=self.catalog.root/'updates'/'apply-update.ps1'
+        # Normalize even older installations' helpers before invoking Windows PowerShell.
+        copied.write_text(helper.read_text(encoding='utf-8-sig'),encoding='utf-8-sig')
+        log=self.catalog.root/'updates'/'update.log'
+        with log.open('a',encoding='utf-8') as stream:stream.write('Starting update to '+self.pending['version']+'\n')
         plan=self.catalog.root/'updates'/'plan.json'
         import os
         plan.write_text(json.dumps({**self.pending,'app':str(app),'data':str(self.catalog.root),'pid':os.getpid(),'port':port}),encoding='utf-8')
-        subprocess.Popen(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(copied),'-Plan',str(plan)],
-                         creationflags=subprocess.CREATE_NO_WINDOW)
+        with log.open('ab') as stream:
+            subprocess.Popen(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(copied),'-Plan',str(plan)],
+                         creationflags=subprocess.CREATE_NO_WINDOW,stdout=stream,stderr=stream,cwd=str(copied.parent))
         return {'restarting':True}

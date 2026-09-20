@@ -51,6 +51,18 @@ class PatchTests(unittest.TestCase):
         self.assertEqual((staged/'runtime/python.exe').read_bytes(),b'python')
         self.assertFalse((staged/'obsolete.py').exists())
 
+    def test_download_wrapper_is_imported_in_backend(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from testagent.updates import Updates
+        wrapper=io.BytesIO()
+        with zipfile.ZipFile(wrapper,'w') as archive:
+            archive.writestr('pangea-testagent-1.0.2-windows-x64-patch.zip',self.package())
+        updater=Updates(SimpleNamespace(root=self.app.parent/'data',core=None))
+        with patch('testagent.updates.ROOT',self.app),patch('testagent.updates.VERSION','1.0.1'):
+            result=updater.inspect(wrapper.getvalue())
+        self.assertEqual(result['version'],'1.0.2')
+
     def test_runtime_mismatch_requires_full_package(self):
         (self.app/'runtime/python.exe').write_bytes(b'wrong runtime')
         with self.assertRaisesRegex(ValueError,'运行时不兼容'):rebuild_patch(self.package(),self.app)
