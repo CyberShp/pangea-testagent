@@ -19,7 +19,7 @@ const route=async hash=>{w.location.hash=hash;await sleep(100);};
 await until(()=>button('新建任务'),'initial tasks');
 await route('#devices');button('添加设备').click();await until(()=>d.getElementById('f-name'),'device form');set('f-name','控制器 A');set('f-address','sim://a');set('f-username','tester');submit();await until(()=>!d.getElementById('dialog').open,'device save');assert.ok(d.body.textContent.includes('控制器 A'));
 await route('#environments');button('新建环境').click();await until(()=>d.getElementById('role-rows'),'empty role form');
-assert.ok(d.getElementById('role-hint').textContent.includes('请先导入'));assert.equal(d.getElementById('save').disabled,true);assert.equal(d.getElementById('add-role').disabled,true);button('关闭').click();
+assert.equal(d.getElementById('save').disabled,false);assert.equal(d.getElementById('add-role').disabled,false);button('关闭').click();
 await route('#skills');button('编写助手').click();await until(()=>d.getElementById('authoring-prompt'),'authoring dialog');
 assert.equal(d.getElementById('dialog').open,true);assert.equal(d.getElementById('save').hidden,true);
 const prompt=d.getElementById('authoring-prompt');assert.ok(prompt.value.includes('testagent-skill-author/SKILL.md'));assert.ok(prompt.value.includes('本次任务场景'));
@@ -30,13 +30,13 @@ w.navigator.clipboard.writeText=async()=>{throw Error('clipboard denied');};butt
 button('关闭').click();assert.equal(d.getElementById('dialog').open,false);
 button('导入模拟样例').click();await until(()=>d.body.textContent.includes('诊断视图检查（模拟）'),'skill import');
 await route('#environments');button('新建环境').click();await until(()=>d.querySelector('[data-environment-role]'),'role dropdown');
-assert.equal(d.querySelector('#role-rows input'),null);assert.equal(d.querySelector('[data-environment-role]').value,'controller');assert.ok(d.querySelector('[data-environment-role]').textContent.includes('模拟控制器（controller）'));assert.equal(d.getElementById('add-role').disabled,true);
+assert.equal(d.querySelector('#role-rows input'),null);assert.ok([...d.querySelector('[data-environment-role]').options].some(o=>o.value==='controller'));assert.ok(d.querySelector('[data-environment-role]').textContent.includes('模拟控制器（controller）'));assert.equal(d.getElementById('add-role').disabled,false);
 button('移除').click();assert.equal(d.getElementById('save').disabled,true);assert.equal(d.getElementById('add-role').disabled,false);button('添加角色').click();assert.equal(d.querySelectorAll('[data-environment-role]').length,1);assert.equal(d.getElementById('save').disabled,false);
-set('f-name','环境 A');submit();await until(()=>!d.getElementById('dialog').open,'environment save');assert.ok(d.body.textContent.includes('环境 A'));
-// Removing a Skill preserves the existing environment role while new environments need imported roles.
+d.querySelector('[data-environment-role]').value='controller';set('f-name','环境 A');submit();await until(()=>!d.getElementById('dialog').open,'environment save');assert.ok(d.body.textContent.includes('环境 A'));
+// Removing a Skill preserves the existing environment role while bundled scenario roles remain available.
 await route('#skills');button('删除').click();await until(()=>!d.body.textContent.includes('诊断视图检查（模拟）'),'skill removed');
-await route('#environments');button('编辑').click();await until(()=>d.querySelector('[data-environment-role]'),'historical role');assert.equal(d.querySelector('[data-environment-role]').value,'controller');assert.ok(d.querySelector('[data-environment-role]').textContent.includes('已有角色'));assert.equal(d.getElementById('save').disabled,false);submit();await until(()=>!d.getElementById('dialog').open,'historical environment saved');
-button('新建环境').click();await until(()=>d.getElementById('role-hint'),'new empty environment');assert.equal(d.querySelector('[data-environment-role]'),null);assert.equal(d.getElementById('save').disabled,true);button('关闭').click();
+await route('#environments');button('编辑').click();await until(()=>d.querySelector('[data-environment-role]'),'historical role');assert.ok([...d.querySelector('[data-environment-role]').options].some(o=>o.value==='controller'));assert.ok(d.querySelector('[data-environment-role]').textContent.includes('已有角色'));assert.equal(d.getElementById('save').disabled,false);submit();await until(()=>!d.getElementById('dialog').open,'historical environment saved');
+button('新建环境').click();await until(()=>d.getElementById('role-hint'),'new empty environment');assert.ok(d.querySelector('[data-environment-role]'));assert.equal(d.getElementById('save').disabled,false);button('关闭').click();
 await route('#skills');button('导入模拟样例').click();await until(()=>d.body.textContent.includes('诊断视图检查（模拟）'),'skill reimport');
 await route('#tasks');button('新建任务').click();await until(()=>d.querySelector('[data-role]'),'dynamic role form');set('f-title','第一条任务');submit();await until(()=>button('确认预览并继续'),'preview visible');assert.equal(button('授权此操作'),undefined);button('确认预览并继续').click();await until(()=>button('授权此操作'),'approval visible');button('授权此操作').click();await until(()=>d.querySelector('.badge.succeeded'),'task success');const firstHash=w.location.hash;assert.ok(d.body.textContent.includes('flag-present'));
 await route('#tasks');button('新建任务').click();await until(()=>d.querySelector('[data-role]'),'second task form');set('f-title','第二条任务');submit();await until(()=>button('确认预览并继续'),'second preview');button('确认预览并继续').click();await until(()=>button('授权此操作'),'second approval');button('授权此操作').click();await until(()=>d.querySelector('.badge.succeeded'),'second success');assert.ok(d.querySelector('#task-heading h2').textContent.includes('第二条任务'));
@@ -45,6 +45,7 @@ await route(firstHash);await until(()=>d.querySelector('#task-heading h2')?.text
 const fixtureId=firstHash.split('/')[1];
 const fixtureData=await (await fetch(url+'/api/tasks/'+fixtureId)).json();
 fixtureData.task.status='running';
+fixtureData.workloads=[{id:'load-fixture',name:'port1',role:'client',state:'running',spec:{driver:'iperf3',duration:60},status:{},samples:[{name:'bandwidth',value:100,unit:'bit/s',at:100,clock:'collection'},{name:'bandwidth',value:200,unit:'bit/s',at:101,clock:'collection'}]}];
 const snap=fixtureData.task.snapshot;
 snap.roles.switch='fixture-switch';snap.devices['fixture-switch']={name:'交换机 CE',address:'sim://switch'};
 const contract=JSON.parse(snap.skill.files['contract.json']);contract.topology=[{from:'controller',to:'switch',label:'管理网络'}];snap.skill.files['contract.json']=JSON.stringify(contract);
@@ -55,6 +56,7 @@ const originalFetch=w.fetch;
 w.fetch=async(u,o)=>String(u).startsWith('/api/tasks/'+fixtureId+'?')?{ok:true,json:async()=>({...fixtureData,events:fixtureData.events.filter(e=>e.seq>Number(new URL(u,url).searchParams.get('after')))})}:originalFetch(u,o);
 emit('agent.chunk',{text:'正在'});emit('agent.chunk',{text:'检查交换机'});
 await w.renderDetail(fixtureId);
+assert.equal(d.querySelectorAll('.load-chart polyline').length,1);assert.ok(d.getElementById('task-workloads').textContent.includes('200.00 bit/s'));assert.ok(button('停止此负载'));
 assert.equal(d.querySelectorAll('.topology-link').length,1);assert.equal(d.querySelectorAll('.device-node').length,2);
 assert.equal(d.querySelector('#chat-messages .message-text').textContent,'正在检查交换机');
 assert.ok(d.querySelector('.diff-add').textContent.includes('+++ after'));assert.ok(d.querySelector('#task-comparisons').textContent.includes('发现差异'));
@@ -71,5 +73,8 @@ assert.equal(d.getElementById('device-filter-label').textContent,'当前设备�
 button('显示全部设备').click();assert.equal(firstLog.hidden,false);button('回到最新对话').click();assert.equal(chatPane.scrollTop,1000);
 w.fetch=originalFetch;
 await route('#settings');button('添加后端').click();await until(()=>d.getElementById('f-base_url'),'profile form');set('f-name','内网 API');set('f-base_url','http://127.0.0.1:9/v1');set('f-api_key','ui-fixture-secret');submit();await until(()=>!d.getElementById('dialog').open,'profile save');assert.ok(d.body.textContent.includes('内网 API'));assert.ok(!d.body.textContent.includes('ui-fixture-secret'));
+button('离线工具库').click();await until(()=>d.getElementById('import-tool'),'offline tools');button('关闭').click();
+await route('#tasks');button('网卡极限带宽测试').click();await until(()=>d.querySelector('[data-param=mode]'),'preset parameters');
+assert.equal(d.getElementById('dialog-title').textContent,'网卡极限带宽测试');assert.equal(d.querySelector('[data-param=mode]').value,'单端口');assert.ok(d.querySelector('[data-param=mode]').textContent.includes('整卡双端口'));assert.ok(d.querySelector('[data-param=client2_interface]'));assert.ok(d.querySelector('[data-param=server2_ip]'));assert.equal(d.querySelector('[data-param=port2]').value,'5202');assert.ok(!d.getElementById('f-backend').textContent.includes('模拟'));button('关闭').click();
 assert.deepEqual(errors,[]);process.stdout.write('UI DOM checks passed: role selection, mandatory preview, task completion, declared topology, configuration diff, stable editor and logs, merged chunks, scroll controls, backend configuration.\n');
 })().catch(e=>{process.stderr.write(e.stack+'\n');process.exitCode=1;}).finally(async()=>{if(dom)dom.window.close();server.kill('SIGTERM');await new Promise(r=>server.once('exit',r));fs.rmSync(data,{recursive:true,force:true});});

@@ -63,6 +63,9 @@ def make_server(core,port=0,catalog=None,runtime=None):
             url=urlsplit(self.path);q={k:v[0] for k,v in parse_qs(url.query).items()}
             try:
                 if url.path=='/api/health':self.send(200,{'version':VERSION,'status':'ready'})
+                elif url.path=='/api/tools':
+                    from .tool_library import ToolLibrary
+                    self.send(200,ToolLibrary(catalog).list())
                 elif url.path=='/api/state':self.send(200,{**catalog.state(),'token':token,'version':VERSION})
                 elif url.path=='/api/stream':
                     ident=q['task_id'];core.task(ident)
@@ -93,7 +96,10 @@ def make_server(core,port=0,catalog=None,runtime=None):
                     from .execution import comparisons
                     self.send(200,{'task':public,'events':core.events(ident,int(q.get('after',0))),
                         'files':catalog.files(ident),'recoveries':runtime.recovery_list(ident),
-                        'previews':core.previews(ident),'comparisons':comparisons(core,ident)})
+                        'previews':core.previews(ident),'comparisons':comparisons(core,ident),'workloads':runtime.workloads.list(ident)})
+                elif url.path=='/api/scenarios/detail':
+                    from .scenarios import package
+                    self.send(200,package(q['id']))
                 elif url.path=='/api/skills/detail':
                     with core.lock:row=core.db.execute('SELECT package FROM skills WHERE id=? AND version=?',(q['id'],q['version'])).fetchone()
                     if not row:raise DomainError('Skill 不存在')
@@ -132,6 +138,9 @@ def make_server(core,port=0,catalog=None,runtime=None):
                 if not 0<length<=maximum:raise DomainError('请求大小无效')
                 raw=self.rfile.read(length)
                 if self.path=='/api/updates/import':result=updates.inspect(raw)
+                elif self.path=='/api/tools/import':
+                    from .tool_library import ToolLibrary
+                    result=ToolLibrary(catalog).import_zip(raw)
                 elif self.path=='/api/skills/import':
                     package=from_zip(raw);result=core.import_skill(package)
                 else:
@@ -186,7 +195,7 @@ def make_server(core,port=0,catalog=None,runtime=None):
                 return {'deleted':True,'historical_versions':'保留在任务快照中'}
             if path=='/api/tasks':
                 with runtime.dispatch_lock:
-                    task=core.create_task(v['title'],v['environment_id'],v['skill_id'],v['version'],v.get('backend','simulation'),v.get('model',''),v.get('parameters'),v.get('roles'))
+                    task=core.create_task(v['title'],v['environment_id'],v.get('skill_id',''),v.get('version',''),v.get('backend','simulation'),v.get('model',''),v.get('parameters'),v.get('roles'),scenario=v.get('scenario_id'))
                     try:
                         for item in v.get('files',[]):catalog.add_file(task,item['name'],base64.b64decode(item['data'],validate=True))
                     except Exception as exc:
@@ -207,6 +216,8 @@ def make_server(core,port=0,catalog=None,runtime=None):
                 core.fail(v['task_id'],'用户拒绝操作授权')
                 if v['task_id'] in runtime.runs:runtime.runs[v['task_id']]['cancel'].set()
                 return {'rejected':True}
+            if path=='/api/workloads/refresh':return runtime.workloads.refresh(v['task_id'],v['name'])
+            if path=='/api/workloads/stop':return runtime.workloads.refresh(v['task_id'],v['name'],True)
             if path=='/api/stop':return runtime.stop(v['task_id'])
             if path=='/api/scene/release':return runtime.release_scene(v['task_id'])
             if path=='/api/recovery/propose':return runtime.propose_recovery(v['task_id'])

@@ -19,7 +19,10 @@ function panel(id,html){
  target.querySelectorAll('details[data-key]').forEach(el=>{if(opened.has(el.dataset.key))el.open=true;});
 }
 function operationText(op){
- const names={shell_open:'建立交互终端',shell_close:'关闭交互终端',wait_connected:'等待设备重新连接',remote_read:'读取文件',remote_write:'写入文件',upload:'上传文件',download:'下载文件',script:'执行脚本'};
+ const names={load_start:'启动负载',load_status:'查询负载',load_stop:'停止负载',tool_deploy:'部署工具',tune_apply:'应用中断配置',tune_restore:'恢复中断配置',shell_open:'建立交互终端',shell_close:'关闭交互终端',wait_connected:'等待设备重新连接',remote_read:'读取文件',remote_write:'写入文件',upload:'上传文件',download:'下载文件',script:'执行脚本'};
+ if(op.action==='load_start')return '启动负载：'+JSON.stringify(op.load,null,2);
+ if(op.action==='tune_apply')return '调整中断：'+JSON.stringify(op.tuning,null,2);
+ if(op.action==='tool_deploy')return '部署离线工具：'+op.tool_id;
  if(op.action==='exec'||op.action==='simulation')return op.command;
  if(op.action==='shell_send')return op.text;
  if(op.action==='remote_write')return `${names[op.action]}：${op.path}\n${op.text}`;
@@ -73,7 +76,7 @@ function comparisonsHTML(changes){
 }
 function ensureTaskShell(task){
  if($('task-detail')?.dataset.taskId===task.id)return false;
- $('content').innerHTML=`<div id="task-detail" data-task-id="${esc(task.id)}"><div id="task-heading"></div><section class="card execution-overview"><div class="section-heading"><h2>变更预览</h2><span class="muted">确认后执行</span></div><div id="task-preview"></div></section><section class="card execution-overview"><h2>设备与执行状态</h2><div id="task-topology"></div></section><div class="detail"><div class="stack"><div class="card" id="task-progress"></div><div class="card"><h2>配置前后对比</h2><div id="task-comparisons"></div></div><div class="card" id="task-files-panel"></div><div class="card" id="task-recovery"></div><div class="card"><div class="section-heading"><h2>命令与执行日志</h2><button id="clear-device-filter" class="secondary" hidden>显示全部设备</button></div><p id="device-filter-label" class="muted" hidden></p><div id="task-events" class="execution-log" tabindex="0" aria-label="执行日志"></div><button id="latest-logs" class="secondary latest-button" hidden>回到最新日志</button></div></div><details id="chat" class="card chat" ${innerWidth>1250?'open':''}><summary>Agent 对话</summary><div class="chat-messages" id="chat-messages" tabindex="0" aria-label="Agent 对话"></div><button id="latest-chat" class="secondary latest-button" hidden>回到最新对话</button><form id="chat-form"><label for="task-message">补充信息或调整后续要求</label><textarea id="task-message" rows="4" required></textarea><button type="submit">发送</button></form></details></div></div>`;
+ $('content').innerHTML=`<div id="task-detail" data-task-id="${esc(task.id)}"><div id="task-heading"></div><section class="card execution-overview"><div class="section-heading"><h2>变更预览</h2><span class="muted">确认后执行</span></div><div id="task-preview"></div></section><section class="card execution-overview"><h2>负载与性能</h2><div id="task-workloads"></div></section><section class="card execution-overview"><h2>设备与执行状态</h2><div id="task-topology"></div></section><div class="detail"><div class="stack"><div class="card" id="task-progress"></div><div class="card"><h2>配置前后对比</h2><div id="task-comparisons"></div></div><div class="card" id="task-files-panel"></div><div class="card" id="task-recovery"></div><div class="card"><div class="section-heading"><h2>命令与执行日志</h2><button id="clear-device-filter" class="secondary" hidden>显示全部设备</button></div><p id="device-filter-label" class="muted" hidden></p><div id="task-events" class="execution-log" tabindex="0" aria-label="执行日志"></div><button id="latest-logs" class="secondary latest-button" hidden>回到最新日志</button></div></div><details id="chat" class="card chat" ${innerWidth>1250?'open':''}><summary>Agent 对话</summary><div class="chat-messages" id="chat-messages" tabindex="0" aria-label="Agent 对话"></div><button id="latest-chat" class="secondary latest-button" hidden>回到最新对话</button><form id="chat-form"><label for="task-message">补充信息或调整后续要求</label><textarea id="task-message" rows="4" required></textarea><button type="submit">发送</button></form></details></div></div>`;
  $('chat-form').addEventListener('submit',e=>{
   e.preventDefault();const editor=$('task-message'),text=editor.value;
   act(async()=>{await request('/api/tasks/message',{task_id:task.id,text});if(editor.value===text)editor.value='';},'消息已提交，后续设备操作需要重新预览');
@@ -142,6 +145,7 @@ async function renderDetail(id){
   const waiting=events.filter(e=>e.kind==='input.requested').at(-1);
   const previewPending=(data.previews||[]).some(p=>p.status==='pending');
   panel('task-heading',`<div class="toolbar"><div class="actions">${link('返回任务','#tasks')}${badge(task.status)}<span>${esc(scenes[task.scene]||task.scene)}</span></div><div class="actions">${link('导出报告','/api/report?task_id='+id)}${active(task.status)&&task.status!=='stopping'?btn('强制停止','stop',id,'danger'):''}</div></div><h2>${esc(task.title)}</h2><p>${esc(snap.environment_name)} · ${esc(snap.skill.name)} / ${esc(snap.skill.version)} · ${esc(snap.profile?.name||'本地模拟')} ${esc(snap.model||'')}</p>${snap.backend==='simulation'?'<div class="notice">这是模拟任务，没有连接真实设备。</div>':''}${task.status==='waiting_user'&&!previewPending?`<div class="notice"><h3>需要你的处理</h3>${pending?`<p>${esc(pending.payload.description)}</p><pre>${esc(pending.payload.command)}</pre><div class="actions">${btn('授权此操作','approve',pending.payload.id)}${btn('拒绝并结束任务','reject',pending.payload.id,'secondary')}</div>`:`<p>${esc(waiting?.payload.text||'请在对话区补充信息')}</p>`}</div>`:''}`);
+  panel('task-workloads',workloadsHTML(data));
   panel('task-preview',previewHTML(data));panel('task-topology',topologyHTML(task,events));panel('task-comparisons',comparisonsHTML(data.comparisons||[]));
   const completed=new Set(events.filter(e=>e.kind==='step.completed').map(e=>e.payload.id));
   const checks=new Map(events.filter(e=>e.kind==='check.result').map(e=>[e.payload.id,e.payload]));
@@ -155,4 +159,21 @@ async function renderDetail(id){
  })();
  detailRequests.set(id,work);
  try{return await work;}finally{detailRequests.delete(id);}
+}
+
+function sampleChart(samples,label){
+ if(!samples.length)return '<p class="muted">尚未采集</p>';
+ const points=samples.slice(-300),values=points.map(p=>p.value),low=Math.min(...values),high=Math.max(...values);
+ const start=points[0].at,end=points.at(-1).at;
+ const line=points.map(p=>`${20+560*(p.at-start)/Math.max(.001,end-start)},${110-90*(p.value-low)/Math.max(.001,high-low)}`).join(' ');
+ return `<figure class="load-chart"><figcaption>${esc(label)} · 最新 ${esc(points.at(-1).value.toFixed(2))} ${esc(points.at(-1).unit)}</figcaption><svg viewBox="0 0 600 140" role="img" aria-label="${esc(label)}性能曲线"><title>${esc(label)}，${esc(date(start*1000))} 至 ${esc(date(end*1000))}</title><line x1="20" y1="110" x2="580" y2="110" stroke="currentColor" opacity=".2"/><polyline points="${line}" fill="none" stroke="currentColor" stroke-width="2"/><text x="20" y="135">${esc(low.toFixed(2))} — ${esc(high.toFixed(2))} ${esc(points.at(-1).unit)}</text></svg><small>${esc(date(start*1000))} — ${esc(date(end*1000))} · ${points.at(-1).clock==='collection'?'平台采集时间':'来源时间'}</small></figure>`;
+}
+function workloadsHTML(data){
+ const jobs=data.workloads||[];
+ if(!jobs.length)return '<p class="muted">启动负载后展示状态、目标计划和实测曲线。未采集的指标保持为空。</p>';
+ const labels={starting:'正在启动',running:'运行中',finishing:'正在核对退出',unknown:'状态待核对',succeeded:'已完成',failed:'失败',stopped:'已停止'};
+ return jobs.map(job=>{
+  const groups=new Map();for(const sample of job.samples||[]){const key=sample.name+' / '+sample.unit;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(sample);}
+  return `<details class="card" data-key="load-${esc(job.id)}" open><summary><strong>${esc(job.name)}</strong> · ${esc(job.role)} · ${esc(labels[job.state]||job.state)}</summary><div class="actions">${btn('查询负载','load-refresh',JSON.stringify([data.task.id,job.name]),'secondary')}${!['succeeded','failed','stopped'].includes(job.state)?btn('停止此负载','load-stop',JSON.stringify([data.task.id,job.name]),'danger'):''}</div>${job.status.error?`<p role="alert">${esc(job.status.error)}</p>`:''}<p>驱动：${esc(job.spec.driver)} · 持续时间：${esc(job.spec.duration)} 秒${job.spec.cpus?' · CPU：'+esc(job.spec.cpus):''}</p>${job.spec.plan?`<details><summary>目标负载计划</summary><pre>${esc(JSON.stringify(job.spec.plan,null,2))}</pre><p>分段切换会重启工具，切换间隔记录在实际阶段时间中。</p></details>`:''}<div class="load-charts">${[...groups].map(([label,samples])=>sampleChart(samples,label)).join('')||'<p class="muted">尚未取得有效性能样本</p>'}</div>${job.status.history?`<details><summary>实际阶段与退出结果</summary><pre>${esc(JSON.stringify(job.status.history,null,2))}</pre></details>`:''}</details>`;
+ }).join('');
 }

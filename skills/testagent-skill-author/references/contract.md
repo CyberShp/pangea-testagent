@@ -88,3 +88,7 @@ steps、checks 必须明确 required。检查和关键操作引用有效 step_id
 `capture_phase`（before 或 after），交互命令还需实际 session_id。这些采集操作同样列入 preview。
 平台直接保存工具返回文本和 operation_id，输出逐行差异；每个阶段只保存一次，原始证据不可覆盖。
 缺少任一阶段时展示无法对比。文本相同仅代表两次采集结果一致，不能替代业务检查点。
+
+## 持续负载与性能
+
+平台支持 workloads 声明、tool_list/tool_deploy、load_start/load_status/load_wait/load_stop，以及 tune_apply/tune_restore。具体参数、执行语义、指标与工具包格式见 [性能场景约定](performance.md)。所有远端动作仍通过上述预览与授权链；负载实际结束、调优恢复后才能完成任务。

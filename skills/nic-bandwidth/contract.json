@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "roles": [
+    {
+      "id": "client",
+      "name": "被测卡所在主机（客户端）"
+    },
+    {
+      "id": "server",
+      "name": "对端设备（服务端）"
+    }
+  ],
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "client_interface": {
+        "type": "string",
+        "title": "客户端测试网卡",
+        "minLength": 1
+      },
+      "client_ip": {
+        "type": "string",
+        "title": "客户端测试 IP",
+        "minLength": 1
+      },
+      "server_interface": {
+        "type": "string",
+        "title": "服务端测试网卡",
+        "minLength": 1
+      },
+      "server_ip": {
+        "type": "string",
+        "title": "服务端测试 IP",
+        "minLength": 1
+      },
+      "port": {
+        "type": "integer",
+        "title": "测试端口",
+        "default": 5201,
+        "minimum": 1024,
+        "maximum": 65535
+      },
+      "parallel": {
+        "type": "integer",
+        "title": "并发流",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 128
+      },
+      "duration": {
+        "type": "integer",
+        "title": "每方向测量秒数",
+        "default": 60,
+        "minimum": 10,
+        "maximum": 600
+      },
+      "warmup": {
+        "type": "integer",
+        "title": "预热秒数",
+        "default": 3,
+        "minimum": 0,
+        "maximum": 30
+      },
+      "target_gbps": {
+        "type": "number",
+        "title": "目标带宽 Gbit/s（0 仅测量）",
+        "default": 0,
+        "minimum": 0
+      },
+      "mode": {
+        "type": "string",
+        "title": "测试范围",
+        "enum": [
+          "单端口",
+          "整卡双端口"
+        ],
+        "default": "单端口"
+      },
+      "client2_interface": {
+        "type": "string",
+        "title": "客户端第二端口网卡",
+        "default": "",
+        "description": "整卡双端口模式必填"
+      },
+      "client2_ip": {
+        "type": "string",
+        "title": "客户端第二端口测试 IP",
+        "default": "",
+        "description": "整卡双端口模式必填"
+      },
+      "server2_interface": {
+        "type": "string",
+        "title": "服务端第二端口网卡",
+        "default": "",
+        "description": "整卡双端口模式必填"
+      },
+      "server2_ip": {
+        "type": "string",
+        "title": "服务端第二端口测试 IP",
+        "default": "",
+        "description": "整卡双端口模式必填"
+      },
+      "port2": {
+        "type": "integer",
+        "title": "第二对监听端口",
+        "default": 5202,
+        "minimum": 1024,
+        "maximum": 65535
+      }
+    },
+    "required": [
+      "client_interface",
+      "client_ip",
+      "server_interface",
+      "server_ip"
+    ],
+    "allOf": [
+      {
+        "if": {
+          "properties": {
+            "mode": {
+              "const": "整卡双端口"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "then": {
+          "properties": {
+            "client2_interface": {
+              "minLength": 1
+            },
+            "client2_ip": {
+              "minLength": 1
+            },
+            "server2_interface": {
+              "minLength": 1
+            },
+            "server2_ip": {
+              "minLength": 1
+            }
+          },
+          "required": [
+            "client2_interface",
+            "client2_ip",
+            "server2_interface",
+            "server2_ip"
+          ]
+        }
+      }
+    ]
+  },
+  "steps": [
+    {
+      "id": "inspect",
+      "name": "识别环境与测试路径",
+      "required": true
+    },
+    {
+      "id": "baseline",
+      "name": "默认测试与确认后的复测",
+      "required": true
+    },
+    {
+      "id": "report",
+      "name": "结果与恢复核对",
+      "required": true
+    }
+  ],
+  "checks": [
+    {
+      "id": "environment",
+      "step_id": "inspect",
+      "required": true
+    },
+    {
+      "id": "measurement",
+      "step_id": "baseline",
+      "required": true
+    },
+    {
+      "id": "cleanup",
+      "step_id": "report",
+      "required": true
+    }
+  ],
+  "critical_actions": [
+    {
+      "id": "load",
+      "step_id": "baseline",
+      "description": "对指定链路施加 TCP 流量，可能占用链路带宽。"
+    },
+    {
+      "id": "affinity",
+      "step_id": "baseline",
+      "description": "调整 CPU 或中断绑定；需保存原值、确认影响范围并恢复验证。"
+    }
+  ],
+  "scripts": [
+    "scripts/inspect.sh"
+  ],
+  "topology": [
+    {
+      "from": "client",
+      "to": "server",
+      "label": "指定测试 IP 的 TCP 路径"
+    }
+  ],
+  "recovery": "按任务会话与真实进程证据核对并停止本次服务；核对 timeout 到期退出。按备份恢复本次更改的 IRQ 与 irqbalance 状态并回读。无法确认时报告待恢复，保留证据。",
+  "workloads": [
+    {
+      "id": "network-client",
+      "role": "client",
+      "driver": "iperf3",
+      "recovery": "通过任务负载记录查询和停止，确认远端监督进程与子进程退出"
+    },
+    {
+      "id": "network-server",
+      "role": "server",
+      "driver": "iperf3",
+      "recovery": "通过任务负载记录查询和停止，确认远端监督进程与子进程退出"
+    }
+  ]
+}

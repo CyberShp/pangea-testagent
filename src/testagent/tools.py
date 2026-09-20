@@ -8,7 +8,7 @@ from .ssh import Cancelled, SSHExecutor
 from .execution import OPERATION_SCHEMA, REMOTE_ACTIONS, validate_operation
 
 ACTIONS = ['skill_read','files','file_read','artifact_write','exec','shell_open','shell_send','shell_close',
-           'remote_read','remote_write','upload','download','script','wait_connected','step','check','ask','finish','preview']
+           'remote_read','remote_write','upload','download','script','wait_connected','step','check','ask','finish','preview','load_start','load_status','load_wait','load_stop','tool_deploy','tune_apply','tune_restore','tool_list']
 TOOL = {'name':'testagent','description': '统一测试任务工具。所有设备操作必须通过此工具；role 来自任务绑定。先读取 Skill 和附件，按约定上报步骤与检查，最后 finish。',
         'inputSchema': {'type':'object','properties': {
             'action':{'type':'string','enum':ACTIONS}, 'role':{'type':'string'}, 'action_id':{'type':'string'},
@@ -18,6 +18,8 @@ TOOL = {'name':'testagent','description': '统一测试任务工具。所有设�
             'args':{'type':'array','items':{'type':'string'}}, 'step_id':{'type':'string'},
             'check_id':{'type':'string'},'passed':{'type':'boolean'},'evidence_operation':{'type':'string'},
             'summary':{'type':'string'}, 'impact':{'type':'string'}, 'verification':{'type':'string'},
+            'load':OPERATION_SCHEMA['properties']['load'], 'tuning':OPERATION_SCHEMA['properties']['tuning'],
+            'tool_id':{'type':'string'},
             'capture_id':{'type':'string'}, 'capture_phase':{'enum':['before','after']},
             'operations':{'type':'array','maxItems':200,'items':OPERATION_SCHEMA}},'required':['action'],'additionalProperties':False}}
 
@@ -60,6 +62,9 @@ class Gateway:
             action=args['action']
             if self.readonly and action not in ('skill_read','files','file_read'):
                 raise DomainError('恢复方案生成阶段只允许读取任务文件，不能操作远端或更改任务')
+            if action=='tool_list':
+                from .tool_library import ToolLibrary
+                return ToolLibrary(self.catalog).list()
             if action=='skill_read':
                 name=args.get('path','SKILL.md')
                 files=self.snapshot()['skill']['files']
@@ -153,7 +158,28 @@ class Gateway:
             self.active_operation={'id':operation,'device_id':device}
             timeout=args.get('timeout',300)
             try:
-                if action=='exec': result=self.executor.exec(device,args['command'],timeout,operation)
+                if action=='load_start':result=self.runtime.workloads.start(self.task,role,args['load'],self.executor,operation)
+                elif action in ('load_status','load_stop','load_wait'):
+                    jobs=self.runtime.workloads.list(self.task,False)
+                    if not any(j['name']==args['name'] and j['role']==role for j in jobs):raise DomainError('负载不属于此角色')
+                    result=self.runtime.workloads.refresh(self.task,args['name'],action=='load_stop')
+                    if action=='load_wait':
+                        deadline=time.monotonic()+timeout
+                        while True:
+                            if args.get('expect') and re.search(args['expect'],result.get('output_tail','')):break
+                            if not args.get('expect') and result.get('confirmed_exit') and not result.get('more'):break
+                            if result.get('state') in ('failed','stopped'):raise DomainError('负载提前结束：'+str(result))
+                            if time.monotonic()>deadline:raise TimeoutError('等待负载超时')
+                            if self.cancelled.wait(1):raise Cancelled('任务已停止')
+                            result=self.runtime.workloads.refresh(self.task,args['name'])
+                elif action=='tool_deploy':
+                    from .tool_library import ToolLibrary
+                    result=ToolLibrary(self.catalog).deploy(args['tool_id'],self.executor,device)
+                elif action in ('tune_apply','tune_restore'):
+                    from .tuning import Tuning
+                    tuning=Tuning(self.catalog,self.task,role,self.executor)
+                    result=tuning.apply(args['tuning']) if action=='tune_apply' else tuning.restore(args['name'])
+                elif action=='exec': result=self.executor.exec(device,args['command'],timeout,operation)
                 elif action=='shell_open': result=self.executor.shell_open(device,timeout,args.get('expect'))
                 elif action=='shell_send': result=self.executor.shell_send(device,args['session_id'],args['text'],args.get('expect'),timeout,args.get('expect_disconnect',False))
                 elif action=='shell_close': result=self.executor.shell_close(device,args['session_id'])

@@ -53,6 +53,9 @@ class Core:
           CREATE TABLE IF NOT EXISTS recovery(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), plan TEXT, status TEXT, child_id TEXT, created TEXT);
           CREATE TABLE IF NOT EXISTS process_handles(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), device_id TEXT, details TEXT, active INTEGER);
           CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
+          CREATE TABLE IF NOT EXISTS workloads(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), role TEXT, device_id TEXT, name TEXT, spec TEXT, directory TEXT, state TEXT, status TEXT, offset INTEGER, created REAL, operation_id TEXT, UNIQUE(task_id,name));
+          CREATE TABLE IF NOT EXISTS load_samples(seq INTEGER PRIMARY KEY AUTOINCREMENT, workload_id TEXT REFERENCES workloads(id), sample TEXT);
+          CREATE TABLE IF NOT EXISTS tuning(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), role TEXT, name TEXT, data TEXT, restored INTEGER DEFAULT 0, UNIQUE(task_id,name));
           CREATE TABLE IF NOT EXISTS previews(id TEXT PRIMARY KEY, task_id TEXT REFERENCES tasks(id), data TEXT, status TEXT, position INTEGER DEFAULT 0, created TEXT);
           CREATE TABLE IF NOT EXISTS config_captures(task_id TEXT REFERENCES tasks(id), comparison_id TEXT, phase TEXT, operation_id TEXT REFERENCES approvals(id), text TEXT, PRIMARY KEY(task_id,comparison_id,phase));
         """)
@@ -108,10 +111,17 @@ class Core:
                 raise DomainError("版本已存在，更新请使用新版本号") from exc
         return result
 
-    def create_task(self, title, environment_id, skill_id, version, backend="simulation", model="", parameters=None, roles=None):
+    def create_task(self, title, environment_id, skill_id, version, backend="simulation", model="", parameters=None, roles=None, *, scenario=None):
         with self.tx():
             env = self.db.execute("SELECT * FROM environments WHERE id=?", (environment_id,)).fetchone()
-            skill = self.db.execute("SELECT * FROM skills WHERE id=? AND version=?", (skill_id, version)).fetchone()
+            if scenario is not None:
+                from .scenarios import package as scenario_package
+                bundled = scenario_package(scenario)
+                skill = {'package': json.dumps(bundled), 'mode': 'structured'}
+                if backend == 'simulation':
+                    raise DomainError('预设场景需要真实执行后端')
+            else:
+                skill = self.db.execute("SELECT * FROM skills WHERE id=? AND version=?", (skill_id, version)).fetchone()
             if not env or not skill or not title.strip():
                 raise DomainError("任务名称、环境或 Skill 版本无效")
             roles = roles if roles is not None else json.loads(env["roles"])
@@ -126,6 +136,9 @@ class Core:
                 raise DomainError("缺少 Skill 所需的设备角色")
             from .skills import validate_parameters
             parameters = validate_parameters(contract, parameters or {})
+            if scenario is not None:
+                from .scenarios import validate_parameters as validate_scenario_parameters
+                validate_scenario_parameters(scenario,parameters,roles)
             profile = None
             if backend != 'simulation':
                 row = self.db.execute('SELECT * FROM profiles WHERE id=?', (backend,)).fetchone()
@@ -147,6 +160,8 @@ class Core:
             snapshot = {"environment_id": env["id"], "environment_name": env["name"], "roles": roles,
                         "policy": env["policy"], "skill": package, "mode": skill["mode"], "backend": backend,
                         "profile": profile, "model": model, "parameters": parameters, "devices": devices}
+            if scenario is not None:
+                snapshot['scenario_id'] = scenario
             self.db.execute("INSERT INTO tasks VALUES(?,?,?,?,?,?)", (ident, title, "queued", "clean",
                 json.dumps(snapshot, ensure_ascii=False), now()))
             self.db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('last_backend', json.dumps({'backend': backend, 'model': model})))
@@ -330,6 +345,9 @@ class Core:
             plan = self.db.execute("SELECT * FROM previews WHERE task_id=? AND status='approved'", (ident,)).fetchone()
             if not plan or plan['position'] != len(json.loads(plan['data'])['operations']):
                 raise DomainError('变更预览尚未确认或仍有未执行操作')
+            if self.db.execute("SELECT 1 FROM workloads WHERE task_id=? AND state NOT IN ('succeeded','failed','stopped')",(ident,)).fetchone():raise DomainError('仍有未确认退出的负载')
+            owner=task['snapshot'].get('parent_task',ident)
+            if self.db.execute('SELECT 1 FROM tuning WHERE task_id IN (?,?) AND restored=0',(ident,owner)).fetchone():raise DomainError('调优配置尚未恢复核对')
             contract = json.loads(task["snapshot"]["skill"]["files"].get("contract.json", "{}"))
             checks = {r[0]: r[1] for r in self.db.execute("SELECT id,passed FROM checks WHERE task_id=?", (ident,))}
             steps = {r[0] for r in self.db.execute("SELECT id FROM steps WHERE task_id=?", (ident,))}

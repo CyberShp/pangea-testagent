@@ -241,7 +241,7 @@ class V1Tests(unittest.TestCase):
     def test_update_manifest_rejects_unlisted_files_and_tampering(self):
         stream=io.BytesIO()
         with zipfile.ZipFile(stream,'w') as archive:
-            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.4','files':{}}))
+            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'99.0.0','files':{}}))
             archive.writestr('app/PangeaTestagent.exe',b'tampered')
         with self.assertRaises(DomainError):Updates(self.catalog).inspect(stream.getvalue())
 
@@ -283,9 +283,9 @@ class V1Tests(unittest.TestCase):
         stream=io.BytesIO()
         with zipfile.ZipFile(stream,'w') as archive:
             for name,body in files.items():archive.writestr(name,body)
-            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'1.0.4','files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}))
+            archive.writestr('update-manifest.json',json.dumps({'product':'pangea-testagent','schema_version':1,'version':'99.0.0','files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}))
         result=Updates(self.catalog).inspect(stream.getvalue())
-        self.assertEqual(result['version'],'1.0.4')
+        self.assertEqual(result['version'],'99.0.0')
         self.assertEqual((Path(result['stage'])/'app/entry.py').read_bytes(),b'pass')
 
     def test_update_package_type_errors_and_pending_reset(self):
@@ -307,7 +307,7 @@ class V1Tests(unittest.TestCase):
                'Start-Testagent.cmd':b'launcher','README.md':b'usage'}
         def package(tamper=False):
             stream=io.BytesIO()
-            manifest={'product':'pangea-testagent','schema_version':1,'version':'1.0.4',
+            manifest={'product':'pangea-testagent','schema_version':1,'version':'99.0.0',
                       'files':{name:hashlib.sha256(body).hexdigest() for name,body in files.items()}}
             with zipfile.ZipFile(stream,'w') as archive:
                 for name,body in files.items():archive.writestr(name,b'changed' if tamper and name=='README.md' else body)

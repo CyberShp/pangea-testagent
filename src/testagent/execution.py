@@ -1,10 +1,12 @@
 """Confirmed operation plans and evidence-backed configuration comparisons."""
 import difflib
 import json
+from .load_schema import LOAD, TUNING
 from jsonschema import validate
 
 REMOTE_ACTIONS = ['exec', 'shell_open', 'shell_send', 'shell_close', 'remote_read',
-                  'remote_write', 'upload', 'download', 'script', 'wait_connected']
+                  'remote_write', 'upload', 'download', 'script', 'wait_connected',
+                  'load_start','load_status','load_wait','load_stop','tool_deploy','tune_apply','tune_restore']
 OPERATION_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
@@ -15,12 +17,15 @@ OPERATION_SCHEMA = {
         'expect': {'type': 'string', 'minLength': 1}, 'expect_disconnect': {'type': 'boolean'},
         'path': {'type': 'string'}, 'file_id': {'type': 'string'}, 'name': {'type': 'string'},
         'args': {'type': 'array', 'items': {'type': 'string'}},
+        'load':LOAD, 'tuning':TUNING, 'tool_id':{'type':'string'},
         'capture_id': {'type': 'string'}, 'capture_phase': {'enum': ['before', 'after']},
     },
     'required': ['action', 'role'],
     'allOf': [
         {'if': {'properties': {'action': {'const': action}}}, 'then': {'required': fields}}
         for action, fields in {
+            'load_start':['load'],'load_status':['name'],'load_wait':['name'],'load_stop':['name'],
+            'tool_deploy':['tool_id'],'tune_apply':['tuning'],'tune_restore':['name'],
             'exec': ['command'], 'shell_send': ['text'], 'remote_read': ['path'],
             'remote_write': ['path', 'text'], 'upload': ['path', 'file_id'], 'download': ['path'],
         }.items()

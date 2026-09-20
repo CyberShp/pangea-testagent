@@ -132,6 +132,8 @@ class Catalog:
     def state(self):
         with self.core.lock:
             state = self.core.overview()
+            from .scenarios import catalog as scenario_catalog
+            state['scenarios'] = scenario_catalog()
             roles = {}
             for row in self.core.db.execute('SELECT package FROM skills ORDER BY id,version'):
                 package = json.loads(row['package'])
@@ -233,7 +235,8 @@ class Catalog:
                 raise DomainError('活动或现场待处理任务不能删除')
             if self.core.db.execute("SELECT 1 FROM recovery WHERE task_id=? AND status IN ('planning','running','proposed')", (task,)).fetchone():
                 raise DomainError('请先处理恢复方案')
-            for table in ('config_captures','previews','events','checks','steps','approvals','messages','artifacts','process_handles'):
+            self.core.db.execute('DELETE FROM load_samples WHERE workload_id IN (SELECT id FROM workloads WHERE task_id=?)',(task,))
+            for table in ('workloads','tuning','config_captures','previews','events','checks','steps','approvals','messages','artifacts','process_handles'):
                 self.core.db.execute(f'DELETE FROM {table} WHERE task_id=?', (task,))
             self.core.db.execute('DELETE FROM recovery WHERE task_id=? OR child_id=?', (task,task))
             self.core.db.execute('DELETE FROM tasks WHERE id=?', (task,))
@@ -243,6 +246,7 @@ class Catalog:
         with self.core.tx():
             if self.core.task(task)['status'] in ACTIVE:
                 raise DomainError('不能释放活动任务的设备')
+            if self.core.db.execute("SELECT 1 FROM workloads WHERE task_id=? AND state NOT IN ('succeeded','failed','stopped')",(task,)).fetchone():raise DomainError('负载状态尚未核实，请先查询或停止负载')
             self.core.db.execute('DELETE FROM reservations WHERE task_id=?', (task,))
             self.core.db.execute("UPDATE tasks SET scene='user_released' WHERE id=?", (task,))
             self.core.emit(task, 'scene.released', {'reason': '用户确认已核对现场并释放占用；不代表自动恢复'})
@@ -268,6 +272,15 @@ class Catalog:
                       ('有配置差异' if change['changed'] else '采集结果一致') if change['available'] else '无法对比：缺少执行前或执行后采集结果', '']
             if change['available']:lines += ['```diff',change['diff'],'```','']
         with zipfile.ZipFile(stream,'w',zipfile.ZIP_DEFLATED) as archive:
+            with self.core.lock:
+                jobs=[dict(r) for r in self.core.db.execute('SELECT * FROM workloads WHERE task_id=?',(task,))]
+                for job in jobs:
+                    rows=[json.loads(r[0]) for r in self.core.db.execute('SELECT sample FROM load_samples WHERE workload_id=? ORDER BY seq',(job['id'],))]
+                    archive.writestr('workloads/'+job['name']+'.json',json.dumps(self.vault.redact_tree({'job':job,'samples':rows}),ensure_ascii=False))
+                    raw=self.task_dir(task)/('load-'+job['id']+'.log')
+                    if raw.exists():archive.write(raw,'workloads/'+job['name']+'.log')
+                tuning=[dict(r) for r in self.core.db.execute('SELECT * FROM tuning WHERE task_id=?',(task,))]
+                archive.writestr('tuning.json',json.dumps(self.vault.redact_tree(tuning),ensure_ascii=False))
             archive.writestr('previews.json',json.dumps(self.vault.redact_tree(plans),ensure_ascii=False,indent=2))
             archive.writestr('comparisons.json',json.dumps(self.vault.redact_tree(changes),ensure_ascii=False,indent=2))
             for index,change in enumerate(changes,1):

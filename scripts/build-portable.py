@@ -52,7 +52,11 @@ def main():
                     name='/'.join(parts[2:])
                 target=site/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(archive.read(item))
     (runtime/'python312._pth').write_text('python312.zip\n.\nLib/site-packages\n../src\nimport site\n',encoding='utf-8')
-    for name in ('src','web','examples','skills'):
+    from testagent.tool_library import inspect as inspect_tool
+    tools=[inspect_tool(p.read_bytes()) for p in (ROOT/'tool-bundles').glob('*.zip')]
+    if {t['architecture'] for t in tools if t['driver']=='iperf3'} != {'x86_64','aarch64'}:
+        raise ValueError('发布包需要 x86_64 与 aarch64 的 iperf3 离线工具包')
+    for name in ('src','web','examples','skills','tool-bundles'):
         shutil.copytree(ROOT/name,app/name,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     for name in ('entry.py','apply-update.ps1'):shutil.copy2(ROOT/'scripts'/name,app/name)
     (app/'portable.json').write_text(json.dumps({'product':'pangea-testagent','version':VERSION,'runtime':'cpython-3.12.10-win-amd64','inputs_sha256':inputs},indent=2),encoding='utf-8')

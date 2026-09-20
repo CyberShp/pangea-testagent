@@ -29,6 +29,9 @@ def main():
         for name in actual.namelist():
             if name=='update-manifest.json':assert json.loads(actual.read(name))==json.loads(expected.read(name))
             else:assert actual.read(name)==expected.read(name),name
+    from testagent.tool_library import inspect as inspect_tool
+    bundles=[inspect_tool(p.read_bytes()) for p in (ROOT/'dist/portable/app/tool-bundles').glob('*.zip')]
+    assert {b['architecture'] for b in bundles if b['driver']=='iperf3'}=={'x86_64','aarch64'}
     helper=(ROOT/'dist/portable/app/apply-update.ps1').read_bytes()
     assert helper.startswith(b'\xef\xbb\xbf'), 'Windows PowerShell requires UTF-8 BOM'
     if sys.platform=='win32':
@@ -38,7 +41,7 @@ def main():
     print('PASS: runtime-free patch rebuilds the complete update byte-for-byte per app file.')
     with zipfile.ZipFile(portable) as full,zipfile.ZipFile(update) as patch:
         names=set(full.namelist())
-        for name in ('Start-Testagent.cmd','app/entry.py','app/runtime/python312.zip','app/runtime/python312.dll','app/runtime/LICENSE.txt','app/src/testagent/server.py','app/web/app.js','app/skills/testagent-skill-author/SKILL.md','app/apply-update.ps1'):
+        for name in ('Start-Testagent.cmd','app/entry.py','app/runtime/python312.zip','app/runtime/python312.dll','app/runtime/LICENSE.txt','app/src/testagent/server.py','app/src/testagent/scenarios.py','app/web/app.js','app/skills/testagent-skill-author/SKILL.md','app/skills/nic-bandwidth/SKILL.md','app/skills/nic-bandwidth/contract.json','app/skills/nic-bandwidth/scripts/inspect.sh','app/apply-update.ps1'):
             assert name in names,name
         for exe in ('python.exe','pythonw.exe'):
             data=full.read('app/runtime/'+exe)

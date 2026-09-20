@@ -12,3 +12,6 @@ node_modules/
 # Private project documents are not published.
 /docs/
 /AGENTS.md
+
+# Built on native Linux CI and embedded in release artifacts.
+/tool-bundles/

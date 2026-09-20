@@ -101,6 +101,18 @@ def validate(package):
             if op['action']=='shell_send' and not op.get('expect'):errors.append('终端配置采集必须声明 expect')
     except Exception as exc:
         errors.append('拓扑或配置采集声明无效：'+str(exc).splitlines()[0])
+    try:
+        from .load_schema import WORKLOAD_DECLARATIONS
+        validate_schema(contract.get('workloads',[]),WORKLOAD_DECLARATIONS)
+        seen=set()
+        for load in contract.get('workloads',[]):
+            if load['id'] in seen:errors.append('负载声明 id 不能重复')
+            seen.add(load['id'])
+            if load['role'] not in ids['roles']:errors.append('负载声明引用了未定义角色')
+            if load['driver']=='custom' and not all(load.get(k) for k in ('start','status','stop')):
+                errors.append('自研工具需要声明 start/status/stop')
+            if load.get('parser')=='jsonl' and not load.get('metrics'):errors.append('JSONL 采集需要声明指标字段与单位')
+    except Exception as exc:errors.append('负载声明无效：'+str(exc).splitlines()[0])
     return {"mode": "invalid" if errors else "structured", "errors": errors}
 
 
@@ -116,3 +128,12 @@ def validate_parameters(contract, values):
     if errors:
         raise ValueError('参数校验失败：' + '; '.join(e.message for e in errors))
     return result
+
+
+def validate_workload_binding(snapshot, role, spec):
+    contract=json.loads(snapshot['skill']['files'].get('contract.json','{}'))
+    definitions=[w for w in contract.get('workloads',[]) if w['role']==role and w['driver']==spec['driver']]
+    if not definitions:raise ValueError('Skill 未声明此角色的负载驱动')
+    if spec['driver']=='custom':
+        if not any(w.get('parser','none')==spec.get('parser','none') and w.get('metrics',[])==spec.get('metrics',[]) for w in definitions):
+            raise ValueError('自研指标采集必须匹配 Skill 声明')
