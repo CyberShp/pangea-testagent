@@ -133,7 +133,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(self.core.previews(task)[0]['position'],0)
 
     def test_real_ssh_capture_diff_and_report_evidence(self):
-        remote=self.root/'remote';remote.mkdir();(remote/'config').write_text('vlan 10\n')
+        remote=self.root/'remote';remote.mkdir();(remote/'config').write_bytes(b'vlan 10\n')
         fixture=SSHFixture(remote)
         self.catalog.save_device({'id':self.device,'name':'交换机','address':'127.0.0.1','port':fixture.port,'username':'tester'})
         task=self.task();gateway=Gateway(self.runtime,task,threading.Event())

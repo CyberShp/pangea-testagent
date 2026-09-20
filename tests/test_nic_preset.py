@@ -30,24 +30,23 @@ class NicPresetTests(unittest.TestCase):
     def test_builtin_available_without_import_and_frozen_in_task(self):
         from testagent.core import Core
         from testagent.catalog import Catalog
-        with tempfile.TemporaryDirectory() as directory:
-            core = Core(Path(directory) / 'db.sqlite3')
-            self.addCleanup(core.db.close)
-            catalog = Catalog(core, Path(directory) / 'data')
-            self.assertEqual(catalog.state()['skills'], [])
-            self.assertEqual(catalog.state()['scenarios'][0]['id'], 'nic-bandwidth')
-            a = catalog.save_device({'name':'a','address':'192.0.2.10','username':'root'})
-            b = catalog.save_device({'name':'b','address':'192.0.2.20','username':'root'})
-            env = catalog.save_environment({'name':'test','roles':{'client':a,'server':b},'policy':'confirm'})
-            profile = catalog.save_profile({'name':'agent','kind':'openai','config':{'base_url':'http://127.0.0.1:9/v1'}})
-            ident = core.create_task('card',env,'','',profile,'model',
-                {'client_interface':'eth1','client_ip':'192.0.2.1','server_interface':'eth1','server_ip':'192.0.2.2'},
-                scenario='nic-bandwidth')
-            snapshot = core.task(ident)['snapshot']
-            self.assertEqual(snapshot['scenario_id'], 'nic-bandwidth')
-            self.assertIn('scripts/inspect.sh', snapshot['skill']['files'])
-            self.assertEqual(catalog.state()['skills'], [])
-
+        directory=self.enterContext(tempfile.TemporaryDirectory())
+        core = Core(Path(directory) / 'db.sqlite3')
+        self.addCleanup(core.db.close)
+        catalog = Catalog(core, Path(directory) / 'data')
+        self.assertEqual(catalog.state()['skills'], [])
+        self.assertEqual(catalog.state()['scenarios'][0]['id'], 'nic-bandwidth')
+        a = catalog.save_device({'name':'a','address':'192.0.2.10','username':'root'})
+        b = catalog.save_device({'name':'b','address':'192.0.2.20','username':'root'})
+        env = catalog.save_environment({'name':'test','roles':{'client':a,'server':b},'policy':'confirm'})
+        profile = catalog.save_profile({'name':'agent','kind':'openai','config':{'base_url':'http://127.0.0.1:9/v1'}})
+        ident = core.create_task('card',env,'','',profile,'model',
+            {'client_interface':'eth1','client_ip':'192.0.2.1','server_interface':'eth1','server_ip':'192.0.2.2'},
+            scenario='nic-bandwidth')
+        snapshot = core.task(ident)['snapshot']
+        self.assertEqual(snapshot['scenario_id'], 'nic-bandwidth')
+        self.assertIn('scripts/inspect.sh', snapshot['skill']['files'])
+        self.assertEqual(catalog.state()['skills'], [])
 
 
 if __name__ == '__main__':

@@ -18,8 +18,7 @@ def main():
     arch=platform.machine()
     if platform.system()!='Linux' or arch not in ('x86_64','aarch64'):raise SystemExit('Native Linux x86_64/aarch64 required')
     work=ROOT/'build'/'iperf3';work.mkdir(parents=True,exist_ok=True)
-    source=work/f'iperf-{VERSION}.tar.gz'
-    if not source.exists():urlretrieve(f'https://downloads.es.net/pub/iperf/iperf-{VERSION}.tar.gz',source)
+    source=ROOT/'vendor'/f'iperf-{VERSION}.tar.gz'
     if hashlib.sha256(source.read_bytes()).hexdigest()!=SOURCE_SHA256:raise ValueError('Source checksum mismatch')
     with tarfile.open(source) as archive:archive.extractall(work,filter='data')
     folder=work/f'iperf-{VERSION}'

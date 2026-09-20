@@ -87,7 +87,7 @@ class Workloads:
             if text:
                 # Local raw evidence is append-only and survives remote cleanup.
                 path=self.catalog.task_dir(row['task_id'])/('load-'+ident+'.log')
-                with path.open('a',encoding='utf-8') as stream:stream.write(self.catalog.vault.redact(text))
+                with path.open('a',encoding='utf-8',newline='') as stream:stream.write(self.catalog.vault.redact(text))
             if state!=row['state'] or count:
                 self.core.emit(row['task_id'],'workload.updated',{'id':ident,'name':row['name'],'state':state,'samples':count})
 
