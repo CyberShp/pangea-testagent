@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path, PurePosixPath
 import stat
+import sys
 import zipfile
 
 
@@ -72,5 +73,7 @@ def main():
 
 
 if __name__=='__main__':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
     try:main()
     except Exception as exc:raise SystemExit(str(exc))
