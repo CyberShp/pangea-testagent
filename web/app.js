@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const names={queued:'排队中',running:'执行中',waiting_user:'等待处理',stopping:'正在停止',succeeded:'成功',failed:'失败',stopped:'已停止'};
 const scenes={clean:'无待处理进程',unknown:'现场需核对',needs_recovery:'待恢复',recovering:'恢复中',restored:'已恢复',recovery_failed:'恢复失败',user_released:'用户已释放'};
-const eventNames={'task.created':'任务创建','task.state':'任务状态','approval.requested':'请求操作授权','approval.granted':'操作已授权','tool.started':'操作开始','tool.output':'命令输出','tool.finished':'操作结果','step.completed':'步骤完成','check.result':'检查结果','task.failed':'执行失败','input.requested':'需要补充信息','user.message':'用户消息','task.stopped':'任务停止','file.added':'文件已添加','recovery.proposed':'恢复方案已生成','recovery.authorized':'恢复已授权','cleanup.result':'进程清理结果','agent.summary':'执行结论'};
+const eventNames={'workload.updated':'负载与采样更新','workload.cleanup':'负载停止核对','task.created':'任务创建','task.state':'任务状态','approval.requested':'请求操作授权','approval.granted':'操作已授权','tool.started':'操作开始','tool.output':'命令输出','tool.finished':'操作结果','step.completed':'步骤完成','check.result':'检查结果','task.failed':'执行失败','input.requested':'需要补充信息','user.message':'用户消息','task.stopped':'任务停止','file.added':'文件已添加','recovery.proposed':'恢复方案已生成','recovery.authorized':'恢复已授权','cleanup.result':'进程清理结果','agent.summary':'执行结论'};
 let state,selected=null,loading=false,serial=0,detailCache=new Map(),modelCache=new Map(),pendingUpdate=null;
 const active=s=>['queued','running','waiting_user','stopping'].includes(s);
 const link=(label,url,cls='secondary')=>`<a class="button ${cls}" href="${esc(url)}">${label}</a>`;

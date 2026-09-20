@@ -22,7 +22,7 @@ def main():
     if hashlib.sha256(source.read_bytes()).hexdigest()!=SOURCE_SHA256:raise ValueError('Source checksum mismatch')
     with tarfile.open(source) as archive:archive.extractall(work,filter='data')
     folder=work/f'iperf-{VERSION}'
-    subprocess.run(['./configure','--disable-shared','--enable-static','--without-openssl',
+    subprocess.run(['./configure','--disable-shared','--enable-static','--enable-static-bin','--without-openssl',
                     'CC=musl-gcc','CFLAGS=-O2','LDFLAGS=-static'],cwd=folder,check=True)
     subprocess.run(['make','-j2'],cwd=folder,check=True)
     binary=folder/'src/iperf3'

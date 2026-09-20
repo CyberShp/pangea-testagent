@@ -80,10 +80,25 @@ class Workloads:
             self.core.db.execute('UPDATE workloads SET state=?,status=?,offset=? WHERE id=?',
                 (state,json.dumps(status),row['offset'] if offset is None else offset,ident))
             count=0
+            summaries=old.get('metric_summary',{})
+            if old.get('tool_summary'):status['tool_summary']=old['tool_summary']
             for line in text.splitlines():
+                if spec['driver']=='iperf3':
+                    try:
+                        event=json.loads(line)
+                        if event.get('event')=='end':
+                            status['tool_summary']={key:event['data'][key] for key in ('sum_received','sum_sent','cpu_utilization_percent') if key in event.get('data',{})}
+                    except (ValueError,AttributeError,TypeError):pass
                 for sample in parse_line(line,spec.get('parser',spec['driver'] if spec['driver'] in ('iperf3','vdbench') else 'none'),spec.get('metrics',[])):
                     self.core.db.execute('INSERT INTO load_samples(workload_id,sample) VALUES(?,?)',(ident,json.dumps(sample)))
                     count+=1
+                    key=sample['name']+' / '+sample['unit']
+                    summary=summaries.setdefault(key,{'count':0,'total':0,'min':sample['value'],'max':sample['value'],'unit':sample['unit']})
+                    summary['count']+=1;summary['total']+=sample['value']
+                    summary['min']=min(summary['min'],sample['value']);summary['max']=max(summary['max'],sample['value'])
+                    summary['mean']=summary['total']/summary['count']
+            status['metric_summary']=summaries
+            self.core.db.execute('UPDATE workloads SET status=? WHERE id=?',(json.dumps(status),ident))
             if text:
                 # Local raw evidence is append-only and survives remote cleanup.
                 path=self.catalog.task_dir(row['task_id'])/('load-'+ident+'.log')

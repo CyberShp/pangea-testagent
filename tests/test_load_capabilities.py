@@ -84,7 +84,7 @@ class LoadTests(unittest.TestCase):
                 return json.loads(result.stdout)
             config={'marker':'fixture-owned-marker','stages':[{'command':'sleep 30','duration':30,'rate':None}],'grace':1}
             (root/'config.json').write_text(json.dumps(config))
-            result=call('start');self.assertEqual(result['state'],'running')
+            result=call('start');self.assertEqual(result['state'],'running',result)
             try:
                 result=call('stop')
                 for _ in range(20):

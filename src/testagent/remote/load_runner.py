@@ -20,11 +20,14 @@ def members(group, marker):
     for path in Path('/proc').iterdir():
         if not path.name.isdigit():continue
         try:
+            if os.getpgid(int(path.name))!=group:continue
             stat=(path/'stat').read_text().rsplit(')',1)[1].split()
             if int(stat[2])!=group or stat[0]=='Z':continue
             environment=(path/'environ').read_bytes().split(b'\0')
             if ('TESTAGENT_LOAD='+marker).encode() not in environment:
-                raise RuntimeError('进程组身份无法确认')
+                current=(path/'stat').read_text().rsplit(')',1)[1].split()
+                if current[0]=='Z' or int(current[2])!=group:continue
+                raise RuntimeError('进程组身份无法确认: '+path.name)
             found.append(int(path.name))
         except (FileNotFoundError,ProcessLookupError):continue
     return found

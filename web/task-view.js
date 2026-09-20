@@ -19,7 +19,7 @@ function panel(id,html){
  target.querySelectorAll('details[data-key]').forEach(el=>{if(opened.has(el.dataset.key))el.open=true;});
 }
 function operationText(op){
- const names={load_start:'启动负载',load_status:'查询负载',load_stop:'停止负载',tool_deploy:'部署工具',tune_apply:'应用中断配置',tune_restore:'恢复中断配置',shell_open:'建立交互终端',shell_close:'关闭交互终端',wait_connected:'等待设备重新连接',remote_read:'读取文件',remote_write:'写入文件',upload:'上传文件',download:'下载文件',script:'执行脚本'};
+ const names={load_start:'启动负载',load_status:'查询负载',load_wait:'等待负载',load_stop:'停止负载',tool_deploy:'部署工具',tune_apply:'应用中断配置',tune_restore:'恢复中断配置',shell_open:'建立交互终端',shell_close:'关闭交互终端',wait_connected:'等待设备重新连接',remote_read:'读取文件',remote_write:'写入文件',upload:'上传文件',download:'下载文件',script:'执行脚本'};
  if(op.action==='load_start')return '启动负载：'+JSON.stringify(op.load,null,2);
  if(op.action==='tune_apply')return '调整中断：'+JSON.stringify(op.tuning,null,2);
  if(op.action==='tool_deploy')return '部署离线工具：'+op.tool_id;
@@ -27,7 +27,7 @@ function operationText(op){
  if(op.action==='shell_send')return op.text;
  if(op.action==='remote_write')return `${names[op.action]}：${op.path}\n${op.text}`;
  if(op.action==='script')return `${names[op.action]}：${op.path||op.file_id} ${(op.args||[]).join(' ')}`;
- return (names[op.action]||op.action)+(op.path?'：'+op.path:'');
+ return (names[op.action]||op.action)+(op.path?'：'+op.path:op.name?'：'+op.name:'');
 }
 function previewHTML(data){
  const plans=data.previews||[];
@@ -174,6 +174,6 @@ function workloadsHTML(data){
  const labels={starting:'正在启动',running:'运行中',finishing:'正在核对退出',unknown:'状态待核对',succeeded:'已完成',failed:'失败',stopped:'已停止'};
  return jobs.map(job=>{
   const groups=new Map();for(const sample of job.samples||[]){const key=sample.name+' / '+sample.unit;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(sample);}
-  return `<details class="card" data-key="load-${esc(job.id)}" open><summary><strong>${esc(job.name)}</strong> · ${esc(job.role)} · ${esc(labels[job.state]||job.state)}</summary><div class="actions">${btn('查询负载','load-refresh',JSON.stringify([data.task.id,job.name]),'secondary')}${!['succeeded','failed','stopped'].includes(job.state)?btn('停止此负载','load-stop',JSON.stringify([data.task.id,job.name]),'danger'):''}</div>${job.status.error?`<p role="alert">${esc(job.status.error)}</p>`:''}<p>驱动：${esc(job.spec.driver)} · 持续时间：${esc(job.spec.duration)} 秒${job.spec.cpus?' · CPU：'+esc(job.spec.cpus):''}</p>${job.spec.plan?`<details><summary>目标负载计划</summary><pre>${esc(JSON.stringify(job.spec.plan,null,2))}</pre><p>分段切换会重启工具，切换间隔记录在实际阶段时间中。</p></details>`:''}<div class="load-charts">${[...groups].map(([label,samples])=>sampleChart(samples,label)).join('')||'<p class="muted">尚未取得有效性能样本</p>'}</div>${job.status.history?`<details><summary>实际阶段与退出结果</summary><pre>${esc(JSON.stringify(job.status.history,null,2))}</pre></details>`:''}</details>`;
+  return `<details class="card" data-key="load-${esc(job.id)}" open><summary><strong>${esc(job.name)}</strong> · ${esc(job.role)} · ${esc(labels[job.state]||job.state)}</summary><div class="actions">${btn('查询负载','load-refresh',JSON.stringify([data.task.id,job.name]),'secondary')}${!['succeeded','failed','stopped'].includes(job.state)?btn('停止此负载','load-stop',JSON.stringify([data.task.id,job.name]),'danger'):''}</div>${job.status.error?`<p role="alert">${esc(job.status.error)}</p>`:''}<p>驱动：${esc(job.spec.driver)} · 持续时间：${esc(job.spec.duration)} 秒${job.spec.cpus?' · CPU：'+esc(job.spec.cpus):''}</p>${job.spec.plan?`<details><summary>目标负载计划</summary><pre>${esc(JSON.stringify(job.spec.plan,null,2))}</pre><p>分段切换会重启工具，切换间隔记录在实际阶段时间中。</p></details>`:''}<div class="load-charts">${[...groups].map(([label,samples])=>sampleChart(samples,label)).join('')||'<p class="muted">尚未取得有效性能样本</p>'}</div>${job.status.metric_summary?`<details><summary>本轮采样统计</summary><pre>${esc(JSON.stringify(job.status.metric_summary,null,2))}</pre></details>`:''}${job.status.tool_summary?`<details><summary>工具整轮结果</summary><pre>${esc(JSON.stringify(job.status.tool_summary,null,2))}</pre></details>`:''}${job.status.history?`<details><summary>实际阶段与退出结果</summary><pre>${esc(JSON.stringify(job.status.history,null,2))}</pre></details>`:''}</details>`;
  }).join('');
 }
