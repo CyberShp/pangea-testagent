@@ -97,6 +97,17 @@ class ToolImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'vdbench.jar'):
             normalize_package(archive(files), '5.04.07', 'x86_64')
 
+    def test_32_bit_companion_does_not_make_64_bit_architecture_ambiguous(self):
+        files=vdbench()
+        files['linux/linux32.so']=vdbench(3)['linux/libvdbench.so']
+        self.assertEqual(inspect(normalize_package(archive(files),'5.04.07'))['architecture'],'x86_64')
+        files['linux/arm64.so']=vdbench(183)['linux/libvdbench.so']
+        with self.assertRaisesRegex(ValueError,'无法唯一识别'):
+            normalize_package(archive(files),'5.04.07')
+        self.assertEqual(inspect(normalize_package(archive(files),'5.04.07','aarch64'))['architecture'],'aarch64')
+        with self.assertRaisesRegex(ValueError,'不一致'):
+            normalize_package(archive(vdbench(3)),'5.04.07','x86_64')
+
     def test_invalid_packages_have_actionable_errors(self):
         for payload, message in ((b'not zip', 'ZIP'), (archive({'readme': b'x'}), '无法识别'),
                                  (archive({'tool.json': b'broken'}), 'JSON'),

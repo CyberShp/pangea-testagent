@@ -77,9 +77,10 @@ def normalize_package(data, version='', architecture=''):
             if name.split('/')[0].lower().startswith('linux') and body[:4]==b'\x7fELF' and len(body)>=20 and body[5] in (1,2):
                 machine=int.from_bytes(body[18:20], 'little' if body[5]==1 else 'big')
                 detected.add({62:'x86_64',183:'aarch64'}.get(machine,'unsupported'))
+        supported=detected & {'x86_64','aarch64'}
         if not architecture:
-            if len(detected)!=1 or 'unsupported' in detected:raise DomainError('无法唯一识别 Linux 架构，请选择与本地库匹配的 x86_64 或 ARM64')
-            architecture=next(iter(detected))
+            if len(supported)!=1:raise DomainError('无法唯一识别 Linux 架构，请选择与本地库匹配的 x86_64 或 ARM64')
+            architecture=next(iter(supported))
         if architecture not in ('x86_64','aarch64'):raise DomainError('工具架构必须为 x86_64 或 aarch64')
         if detected and architecture not in detected:raise DomainError('所选架构与 Vdbench Linux 本地库不一致')
         manifest={'name':'vdbench','version':version,'os':'linux','architecture':architecture,
