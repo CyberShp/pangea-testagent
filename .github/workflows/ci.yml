@@ -82,6 +82,12 @@ jobs:
           path: baseline-1.0.3
       - name: Upgrade released 1.0.3 with data and preset checks
         run: python scripts/test-windows-upgrade.py --baseline 1.0.3
+      - uses: actions/checkout@v4
+        with:
+          ref: 0c5ffb2fd604c204a8df9d7d8766482eb36a75cf
+          path: baseline-1.1.0
+      - name: Upgrade 1.1.0 and verify raw Vdbench import
+        run: python scripts/test-windows-upgrade.py --baseline 1.1.0
       - name: Smoke packaged executable
         shell: pwsh
         run: |
@@ -94,18 +100,18 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
-                if ($health.version -eq '1.1.0') { $ready = $true; break }
+                if ($health.version -eq '1.1.1') { $ready = $true; break }
               } catch { }
             }
             if (-not $ready) { throw 'Packaged server did not become ready' }
           } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.1.0-full-windows-x64
+          name: pangea-testagent-1.1.1-full-windows-x64
           path: dist/full-artifact/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.1.0-patch-windows-x64
+          name: pangea-testagent-1.1.1-patch-windows-x64
           path: dist/patch-artifact/
           if-no-files-found: error

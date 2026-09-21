@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser()
-parser.add_argument('--baseline',default='1.0.2',choices=['1.0.2','1.0.3'])
+parser.add_argument('--baseline',default='1.0.2',choices=['1.0.2','1.0.3','1.1.0'])
 args=parser.parse_args()
 import sys
 sys.path.insert(0,str(root/'src'))
@@ -98,6 +98,15 @@ core.db.close()
 ''',encoding='utf-8')
     subprocess.run([str(app/'runtime/python.exe'),str(verify),str(data)],env=env,check=True)
     token=state['token']
+    # Confirm the imported patch actually exposes the corrected HTTP import path.
+    import io, zipfile
+    raw_tool=io.BytesIO()
+    with zipfile.ZipFile(raw_tool,'w') as archive:
+        archive.writestr('vdbench50407/vdbench',b'#!/bin/sh\nexit 0\n')
+        archive.writestr('vdbench50407/vdbench.jar',b'import-fixture-only')
+    imported=post('/api/tools/import?version=5.04.07&architecture=x86_64',raw_tool.getvalue())['result']
+    assert imported['driver']=='vdbench' and imported['version']=='5.04.07'
+    assert any(t['id']==imported['id'] for t in get('/api/tools'))
     assert any(s['id']=='nic-bandwidth' for s in state['scenarios'])
     package=get('/api/scenarios/detail?id=nic-bandwidth')
     assert 'scripts/inspect.sh' in package['files']

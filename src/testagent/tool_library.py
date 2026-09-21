@@ -13,33 +13,87 @@ from .core import DomainError
 LIMIT=64*1024*1024
 
 
-def inspect(data):
+def read_archive(data):
     if len(data)>LIMIT:raise DomainError('工具包限 64 MiB')
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        files={};seen=set();total=0
-        for item in archive.infolist():
-            if item.is_dir():continue
-            name=safe_relative(item.filename);total+=item.file_size
-            if name.casefold() in seen or stat.S_ISLNK(item.external_attr>>16):raise DomainError('工具包路径重复或包含链接')
-            if total>LIMIT or len(seen)>4000:raise DomainError('工具包展开超过限制')
-            seen.add(name.casefold());files[name]=archive.read(item)
-        manifest=json.loads(files.pop('tool.json'))
-        for key in ('name','version'):
-            if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}',manifest.get(key,'')):raise DomainError('工具名称或版本无效')
-        if manifest.get('architecture') not in ('x86_64','aarch64'):raise DomainError('工具架构必须为 x86_64 或 aarch64')
-        if manifest.get('os')!='linux':raise DomainError('工具包必须面向 Linux')
-        if manifest.get('driver') not in ('iperf3','vdbench','custom'):raise DomainError('工具驱动无效')
-        if set(manifest.get('files',{}))!=set(files):raise DomainError('工具校验清单不完整')
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            files={};seen=set();total=0
+            for item in archive.infolist():
+                if stat.S_ISLNK(item.external_attr>>16):raise DomainError('工具包包含链接')
+                if item.is_dir():continue
+                name=safe_relative(item.filename);total+=item.file_size
+                if name.casefold() in seen:raise DomainError('工具包路径重复')
+                if total>LIMIT or len(seen)>=4000:raise DomainError('工具包展开超过限制')
+                seen.add(name.casefold());files[name]=archive.read(item)
+            return files
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+        raise DomainError('无法读取工具 ZIP：文件损坏、加密或压缩格式不支持') from exc
+
+
+def inspect(data):
+    files=read_archive(data)
+    if 'tool.json' not in files:raise DomainError('工具包缺少根目录 tool.json；Vdbench 原始 ZIP 请通过导入工具包入口导入并填写版本')
+    try:manifest=json.loads(files.pop('tool.json'))
+    except (ValueError, UnicodeError) as exc:raise DomainError('tool.json 不是有效的 JSON') from exc
+    if not isinstance(manifest,dict):raise DomainError('tool.json 必须是 JSON 对象')
+    for key in ('name','version'):
+        if not isinstance(manifest.get(key),str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}',manifest[key]):raise DomainError('工具名称或版本无效')
+    if manifest.get('architecture') not in ('x86_64','aarch64'):raise DomainError('工具架构必须为 x86_64 或 aarch64')
+    if manifest.get('os')!='linux':raise DomainError('工具包必须面向 Linux')
+    if manifest.get('driver') not in ('iperf3','vdbench','custom'):raise DomainError('工具驱动无效')
+    hashes=manifest.get('files')
+    if not isinstance(hashes,dict) or set(hashes)!=set(files):raise DomainError('工具校验清单不完整')
+    for name,body in files.items():
+        if hashlib.sha256(body).hexdigest()!=hashes[name]:raise DomainError('工具文件校验失败：'+name)
+    if not isinstance(manifest.get('entrypoint'),str):raise DomainError('tool.json 缺少有效的 entrypoint')
+    entry=safe_relative(manifest['entrypoint'])
+    if entry not in files:raise DomainError('工具入口不存在')
+    executable=manifest.get('executables',[entry])
+    if not isinstance(executable,list) or any(not isinstance(n,str) or n not in files for n in executable) or entry not in executable:raise DomainError('可执行文件列表无效')
+    manifest['executables']=executable
+    manifest['id']=hashlib.sha256(data).hexdigest()
+    manifest['bytes']=len(data)
+    return manifest
+
+
+def normalize_package(data, version='', architecture=''):
+    files=read_archive(data)
+    if 'tool.json' in files:
+        inspect(data)
+        return data
+    # Strip a common wrapper only when it contains the entire payload.
+    manifests=[n for n in files if n.endswith('/tool.json')]
+    entries=manifests or [n for n in files if n=='vdbench' or n.endswith('/vdbench')]
+    if len(entries)!=1:raise DomainError('无法识别工具包：需包含 tool.json，或唯一的 vdbench 启动脚本及 vdbench.jar')
+    prefix=entries[0].rsplit('/',1)[0]+'/' if '/' in entries[0] else ''
+    if prefix:
+        if not all(n.startswith(prefix) for n in files):raise DomainError('工具包包含多个目录，请只打包工具所在目录')
+        files={n[len(prefix):]:body for n,body in files.items()}
+    if not manifests:
+        if not files.get('vdbench') or not files.get('vdbench.jar'):raise DomainError('Vdbench 包缺少 vdbench 启动脚本或 vdbench.jar')
+        if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}',version):raise DomainError('请填写 Vdbench 实际版本（例如 5.04.07），然后重新导入')
+        detected=set()
         for name,body in files.items():
-            if hashlib.sha256(body).hexdigest()!=manifest['files'][name]:raise DomainError('工具文件校验失败：'+name)
-        entry=safe_relative(manifest['entrypoint'])
-        if entry not in files:raise DomainError('工具入口不存在')
-        executable=manifest.get('executables',[entry])
-        if not isinstance(executable,list) or any(n not in files for n in executable):raise DomainError('可执行文件列表无效')
-        manifest['executables']=executable
-        manifest['id']=hashlib.sha256(data).hexdigest()
-        manifest['bytes']=len(data)
-        return manifest
+            if name.split('/')[0].lower().startswith('linux') and body[:4]==b'\x7fELF' and len(body)>=20 and body[5] in (1,2):
+                machine=int.from_bytes(body[18:20], 'little' if body[5]==1 else 'big')
+                detected.add({62:'x86_64',183:'aarch64'}.get(machine,'unsupported'))
+        if not architecture:
+            if len(detected)!=1 or 'unsupported' in detected:raise DomainError('无法唯一识别 Linux 架构，请选择与本地库匹配的 x86_64 或 ARM64')
+            architecture=next(iter(detected))
+        if architecture not in ('x86_64','aarch64'):raise DomainError('工具架构必须为 x86_64 或 aarch64')
+        if detected and architecture not in detected:raise DomainError('所选架构与 Vdbench Linux 本地库不一致')
+        manifest={'name':'vdbench','version':version,'os':'linux','architecture':architecture,
+                  'driver':'vdbench','entrypoint':'vdbench','executables':['vdbench'],
+                  'files':{n:hashlib.sha256(body).hexdigest() for n,body in files.items()}}
+        files['tool.json']=json.dumps(manifest,ensure_ascii=False).encode()
+    output=io.BytesIO()
+    with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as archive:
+        for name,body in sorted(files.items()):
+            item=zipfile.ZipInfo(name);item.compress_type=zipfile.ZIP_DEFLATED
+            archive.writestr(item,body)
+    normalized=output.getvalue()
+    inspect(normalized)
+    return normalized
 
 
 class ToolLibrary:
@@ -55,7 +109,8 @@ class ToolLibrary:
             value=inspect(path.read_bytes());found[value['id']]=value
         return list(found.values())
 
-    def import_zip(self,data):
+    def import_zip(self,data,version='',architecture=''):
+        data=normalize_package(data,version,architecture)
         value=inspect(data);path=self.root/(value['id']+'.zip')
         if not path.exists():
             temp=path.with_suffix('.tmp');temp.write_bytes(data);temp.replace(path)

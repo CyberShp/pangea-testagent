@@ -63,7 +63,9 @@ rate=0 对应空闲阶段。分段通过停止/退出本段、重启下一段实
 
 ## 离线工具包
 
-ZIP 根目录 tool.json，含 name、version、os=linux、architecture=x86_64/aarch64、driver、entrypoint、executables、files。files 为每个载荷文件的相对路径到 SHA-256 映射；tool.json 本身不在映射内。禁止链接和越界路径，展开与压缩均限 64 MiB。保留第三方许可证和依赖说明。Vdbench 工具包由内部获得并导入；Java 可作为已安装依赖由场景检查。
+设置页支持直接导入 Vdbench 原始 ZIP：填写实际版本，Linux 架构从本地库 ELF 头识别，无法确定时手动选择。包需包含 vdbench 和 vdbench.jar，允许单一外层目录；平台保留载荷并自动生成 SHA-256 清单。标准工具包也支持单一外层目录，清单校验不放宽。
+
+标准 ZIP 根目录 tool.json，含 name、version、os=linux、architecture=x86_64/aarch64、driver、entrypoint、executables、files。files 为每个载荷文件的相对路径到 SHA-256 映射；tool.json 本身不在映射内。禁止链接和越界路径，展开与压缩均限 64 MiB。保留第三方许可证和依赖说明。Vdbench 工具包由内部获得并导入；Java 可作为已安装依赖由场景检查。
 
 ## 内网验收
 

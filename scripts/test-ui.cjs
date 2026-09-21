@@ -17,6 +17,17 @@ const set=(id,v)=>{const e=d.getElementById(id);assert.ok(e,'missing '+id);e.val
 const submit=()=>d.getElementById('form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 const route=async hash=>{w.location.hash=hash;await sleep(100);};
 await until(()=>button('新建任务'),'initial tasks');
+await w.toolsDialog();
+assert.ok(d.getElementById('f-tool-version'));
+assert.equal(d.getElementById('f-tool-arch').value,'');
+set('f-tool-version','5.04.07');set('f-tool-arch','x86_64');
+const realChoose=w.chooseFile,realRequest=w.request;let importedUrl;
+w.chooseFile=async(_accept,callback)=>callback([{arrayBuffer:async()=>new ArrayBuffer(0)}]);
+w.request=async(url,...args)=>{if(url.startsWith('/api/tools/import')){importedUrl=url;return {result:{}};}return realRequest(url,...args);};
+d.getElementById('import-tool').click();await until(()=>importedUrl,'tool import options');
+assert.equal(importedUrl,'/api/tools/import?version=5.04.07&architecture=x86_64');
+await sleep(100);w.chooseFile=realChoose;w.request=realRequest;button('关闭').click();
+
 await route('#devices');button('添加设备').click();await until(()=>d.getElementById('f-name'),'device form');set('f-name','控制器 A');set('f-address','sim://a');set('f-username','tester');submit();await until(()=>!d.getElementById('dialog').open,'device save');await until(()=>d.body.textContent.includes('控制器 A'),'saved row visible');
 await route('#environments');button('新建环境').click();await until(()=>d.getElementById('role-rows'),'empty role form');
 assert.equal(d.getElementById('save').disabled,false);assert.equal(d.getElementById('add-role').disabled,false);button('关闭').click();

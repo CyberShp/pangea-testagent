@@ -138,9 +138,10 @@ def make_server(core,port=0,catalog=None,runtime=None):
                 if not 0<length<=maximum:raise DomainError('请求大小无效')
                 raw=self.rfile.read(length)
                 if self.path=='/api/updates/import':result=updates.inspect(raw)
-                elif self.path=='/api/tools/import':
+                elif urlsplit(self.path).path=='/api/tools/import':
                     from .tool_library import ToolLibrary
-                    result=ToolLibrary(catalog).import_zip(raw)
+                    options=parse_qs(urlsplit(self.path).query)
+                    result=ToolLibrary(catalog).import_zip(raw,options.get('version',[''])[0],options.get('architecture',[''])[0])
                 elif self.path=='/api/skills/import':
                     package=from_zip(raw);result=core.import_skill(package)
                 else:

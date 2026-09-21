@@ -128,7 +128,7 @@ refresh();
 
 async function toolsDialog(){
  const tools=await request('/api/tools');
- form('离线工具库',`<p>工具按版本和 Linux 架构保存；部署时核对架构和文件校验值。Vdbench 与自研工具可通过内部工具包导入。</p><button type="button" id="import-tool">导入工具包 ZIP</button>${table(['工具','版本','架构','校验标识'],tools.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.version)}</td><td>${esc(t.architecture)}</td><td><code>${esc(t.id.slice(0,16))}</code></td></tr>`),'暂无离线工具包')}<p>工具包包含 tool.json、入口及依赖文件，格式见编写助手的性能场景约定。</p>`,null);
+ form('离线工具库',`<p>工具按版本和 Linux 架构保存；部署时核对架构和文件校验值。支持直接导入 Vdbench 原始 ZIP，也支持标准工具包。</p>${input('tool-version','Vdbench 原始包版本（按实际版本填写）','','text',false)}${select('tool-arch','Vdbench 原始包 Linux 架构',[['','自动识别'],['x86_64','x86_64'],['aarch64','ARM64 / aarch64']])}<button type="button" id="import-tool">导入工具包 ZIP</button>${table(['工具','版本','架构','校验标识'],tools.map(t=>`<tr><td>${esc(t.name)}</td><td>${esc(t.version)}</td><td>${esc(t.architecture)}</td><td><code>${esc(t.id.slice(0,16))}</code></td></tr>`),'暂无离线工具包')}<p>Vdbench 原始包需包含 vdbench 和 vdbench.jar；平台自动生成校验清单。标准工具包使用自身版本与架构。目标设备仍需 Java。</p>`,null);
  $('form').onsubmit=e=>e.preventDefault();
- $('import-tool').onclick=()=>chooseFile('.zip',async files=>{await request('/api/tools/import',await files[0].arrayBuffer(),true);await toolsDialog();});
+ $('import-tool').onclick=()=>chooseFile('.zip',async files=>{await request('/api/tools/import?'+new URLSearchParams({version:$('f-tool-version').value.trim(),architecture:$('f-tool-arch').value}),await files[0].arrayBuffer(),true);await toolsDialog();});
 }
