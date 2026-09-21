@@ -97,6 +97,10 @@ def make_server(core,port=0,catalog=None,runtime=None):
                     self.send(200,{'task':public,'events':core.events(ident,int(q.get('after',0))),
                         'files':catalog.files(ident),'recoveries':runtime.recovery_list(ident),
                         'previews':core.previews(ident),'comparisons':comparisons(core,ident),'workloads':runtime.workloads.list(ident)})
+                elif url.path=='/api/scenarios/export':
+                    from .scenarios import package
+                    value=package(q['id'])
+                    self.send(200,to_zip(value),'application/zip',value['id']+'-'+value['version']+'.zip')
                 elif url.path=='/api/scenarios/detail':
                     from .scenarios import package
                     self.send(200,package(q['id']))

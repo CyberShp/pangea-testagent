@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 root=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser()
-parser.add_argument('--baseline',default='1.0.2',choices=['1.0.2','1.0.3','1.1.0'])
+parser.add_argument('--baseline',default='1.0.2',choices=['1.0.2','1.0.3','1.1.0','1.1.1'])
 args=parser.parse_args()
 import sys
 sys.path.insert(0,str(root/'src'))

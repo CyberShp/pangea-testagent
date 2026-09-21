@@ -88,6 +88,12 @@ jobs:
           path: baseline-1.1.0
       - name: Upgrade 1.1.0 and verify raw Vdbench import
         run: python scripts/test-windows-upgrade.py --baseline 1.1.0
+      - uses: actions/checkout@v4
+        with:
+          ref: 102cbf6bc44756fcc5cc3e312a127079f61c33e5
+          path: baseline-1.1.1
+      - name: Upgrade 1.1.1 to unified Skill selection
+        run: python scripts/test-windows-upgrade.py --baseline 1.1.1
       - name: Smoke packaged executable
         shell: pwsh
         run: |
@@ -100,18 +106,18 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod 'http://127.0.0.1:18765/api/health'
-                if ($health.version -eq '1.1.1') { $ready = $true; break }
+                if ($health.version -eq '1.1.2') { $ready = $true; break }
               } catch { }
             }
             if (-not $ready) { throw 'Packaged server did not become ready' }
           } finally { Stop-Process -Id $p.Id -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.1.1-full-windows-x64
+          name: pangea-testagent-1.1.2-full-windows-x64
           path: dist/full-artifact/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: pangea-testagent-1.1.1-patch-windows-x64
+          name: pangea-testagent-1.1.2-patch-windows-x64
           path: dist/patch-artifact/
           if-no-files-found: error
