@@ -37,7 +37,8 @@ class ToolImportTests(unittest.TestCase):
                 self.assertEqual(result['architecture'], 'x86_64')
                 self.assertEqual(result['driver'], 'vdbench')
                 self.assertEqual(library.import_zip(payload, '5.04.07')['id'], result['id'])
-                self.assertEqual(len(library.list()), 1)
+                self.assertEqual(sum(t['id']==result['id'] for t in library.list()), 1)
+                self.assertEqual(len(list((Path(directory)/'tools').glob('*.zip'))), 1)
                 stored = (Path(directory)/'tools'/(result['id']+'.zip')).read_bytes()
                 self.assertEqual(hashlib.sha256(stored).hexdigest(), result['id'])
                 with zipfile.ZipFile(io.BytesIO(stored)) as z:
@@ -64,10 +65,11 @@ class ToolImportTests(unittest.TestCase):
                     return urlopen(Request(base+'/api/tools/import'+query,data=payload,
                         headers={'Content-Type':'application/zip','X-Testagent-Token':token}))
                 with send(archive(vdbench()),'?version=5.04.07&architecture=x86_64') as response:
-                    self.assertEqual(json.load(response)['result']['version'],'5.04.07')
+                    imported=json.load(response)['result']
+                    self.assertEqual(imported['version'],'5.04.07')
                 with self.assertRaises(HTTPError) as caught:send(archive({'readme':b'x'}))
                 self.assertIn('无法识别',json.load(caught.exception)['error'])
-                with urlopen(base+'/api/tools') as response:self.assertEqual(len(json.load(response)),1)
+                with urlopen(base+'/api/tools') as response:self.assertEqual(sum(t['id']==imported['id'] for t in json.load(response)),1)
             finally:
                 server.shutdown();server.server_close();thread.join();core.db.close()
 
